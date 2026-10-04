@@ -5,7 +5,9 @@ two offline UPI rails — `*99#` USSD and UPI 123Pay IVR — and confirms
 payment outcomes by reading the bank's confirmation SMS locally. There is no
 backend, no `INTERNET` permission, and no telemetry. This document is the
 map: how the pieces fit, where the load-bearing invariants live, and which
-known simplifications are deliberate.
+known simplifications are deliberate. For the story of how the seams got
+this shape — what changed, why, and what it traded — see
+[deepening-pass.md](deepening-pass.md).
 
 ## The one invariant that matters
 
