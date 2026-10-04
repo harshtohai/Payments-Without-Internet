@@ -24,4 +24,22 @@ val BlueAccentTheme = FlowpayAccentTheme(
     accentLight = Color(0xFF4A9EFF)
 )
 
+/**
+ * UPI 123's rail branding. The green palette defines no distinct ramp shades
+ * (blue splits these roles across four tones; green has two tokens), so
+ * every slot but the bright one collapses onto [FlowpayAccentGreen], with
+ * [FlowpayAccentGreenBright] standing in where BlueAccentTheme uses its
+ * bright variant. PaymentRail.Upi123 provides this through
+ * [LocalFlowpayAccentTheme] so the shared payment dialogs read the accent
+ * seam instead of hardcoding the color.
+ */
+val GreenAccentTheme = FlowpayAccentTheme(
+    primary = FlowpayAccentGreen,
+    primaryDark = FlowpayAccentGreen,
+    headerGradientStart = FlowpayAccentGreen,
+    headerGradientEnd = FlowpayAccentGreen,
+    accent = FlowpayAccentGreen,
+    accentLight = FlowpayAccentGreenBright
+)
+
 val LocalFlowpayAccentTheme = compositionLocalOf { BlueAccentTheme }

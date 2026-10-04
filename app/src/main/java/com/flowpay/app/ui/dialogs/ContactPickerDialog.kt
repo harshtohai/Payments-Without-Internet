@@ -64,10 +64,12 @@ fun ContactPickerDialog(
     var searchQuery by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
 
-    // Load contacts when dialog opens
+    // Load contacts when dialog opens. The nameless-contact fallback is
+    // passed in — a loader has no Context, and its only caller owns the
+    // copy (label_unknown) so no literal hides in here either.
     LaunchedEffect(Unit) {
         val loadedContacts = try {
-            loadContacts(context.contentResolver)
+            loadContacts(context.contentResolver, context.getString(R.string.label_unknown))
         } catch (e: SecurityException) {
             Log.e("ContactPicker", "Contacts permission denied or restricted", e)
             emptyList()
@@ -103,7 +105,7 @@ fun ContactPickerDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Select Contact",
+                    stringResource(R.string.contacts_select_contact),
                     color = Color.White,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
@@ -111,7 +113,7 @@ fun ContactPickerDialog(
                 IconButton(onClick = onDismiss) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
+                        contentDescription = stringResource(R.string.contacts_cd_close),
                         tint = FlowpayTextLightGray
                     )
                 }
@@ -134,7 +136,7 @@ fun ContactPickerDialog(
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
+                            contentDescription = stringResource(R.string.contacts_cd_search),
                             tint = FlowpayTextLightGray
                         )
                     },
@@ -169,9 +171,9 @@ fun ContactPickerDialog(
                     ) {
                         Text(
                             text = if (searchQuery.isEmpty()) {
-                                "No contacts found"
+                                stringResource(R.string.contacts_empty)
                             } else {
-                                "No matches for \"$searchQuery\""
+                                stringResource(R.string.contacts_no_matches, searchQuery)
                             },
                             color = FlowpayTextGray,
                             fontSize = 16.sp
@@ -271,9 +273,14 @@ fun ContactItem(
 
 /**
  * Load contacts from the device's contact database
- * Returns a list of contacts with 10-digit phone numbers
+ * Returns a list of contacts with 10-digit phone numbers. [unknownName] is
+ * the display fallback for contacts the provider returns without a name —
+ * passed in so the copy still lives in strings.xml.
  */
-suspend fun loadContacts(contentResolver: ContentResolver): List<Contact> = withContext(Dispatchers.IO) {
+suspend fun loadContacts(
+    contentResolver: ContentResolver,
+    unknownName: String
+): List<Contact> = withContext(Dispatchers.IO) {
     val contactsList = mutableListOf<Contact>()
     val projection = arrayOf(
         ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
@@ -299,7 +306,7 @@ suspend fun loadContacts(contentResolver: ContentResolver): List<Contact> = with
 
         while (it.moveToNext()) {
             val id = it.getString(idColumn)
-            val name = it.getString(nameColumn) ?: "Unknown"
+            val name = it.getString(nameColumn) ?: unknownName
             val number = it.getString(numberColumn) ?: ""
 
             // Clean the phone number (remove spaces, dashes, brackets, etc.)

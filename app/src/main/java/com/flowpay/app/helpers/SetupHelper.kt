@@ -5,6 +5,7 @@ package com.flowpay.app.helpers
 
 import android.content.Context
 import com.flowpay.app.R
+import com.flowpay.app.data.BankDirectory
 
 /**
  * Helper class containing all business logic for SetupActivity
@@ -89,21 +90,12 @@ class SetupHelper(
     )
 
     /**
-     * Get available banks
+     * Get available banks as (id, display-name) pairs, drawn from the one
+     * bank directory — names are resources, so no bank name is ever
+     * hardcoded (ADR-0002).
      */
     fun getBanks(): List<Pair<String, String>> {
-        return listOf(
-            "sbi" to "State Bank of India",
-            "hdfc" to "HDFC Bank",
-            "icici" to "ICICI Bank",
-            "axis" to "Axis Bank",
-            "kotak" to "Kotak Mahindra Bank",
-            "pnb" to "Punjab National Bank",
-            "bob" to "Bank of Baroda",
-            "yes" to "Yes Bank",
-            "idbi" to "IDBI Bank",
-            "canara" to "Canara Bank"
-        )
+        return BankDirectory.ids.map { it to context.getString(BankDirectory.name(it)) }
     }
 
     /**

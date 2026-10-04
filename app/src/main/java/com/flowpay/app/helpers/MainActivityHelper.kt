@@ -6,7 +6,6 @@ package com.flowpay.app.helpers
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.provider.Settings
 import android.util.Log
 import com.flowpay.app.FlowpayApplication
 import com.flowpay.app.R
@@ -183,7 +182,17 @@ class MainActivityHelper(
             return
         }
 
-        if (permissionManager?.checkOverlayPermission() != true || !Settings.canDrawOverlays(context)) {
+        // Fail closed: without RECEIVE_SMS the bank's confirmation — the
+        // only thing that can ever mark a payment SUCCESS — would never be
+        // seen, so this guard refuses to dial no matter what the UI
+        // assumed. The UI's pre-flight permission checks are affordances;
+        // this, at the last stop before dialing, is the enforcement.
+        if (permissionManager?.checkSMSPermissions() != true) {
+            uiCallback.showToast(context.getString(R.string.error_sms_permission_required))
+            return
+        }
+
+        if (permissionManager?.checkOverlayPermission() != true) {
             Log.d(TAG, "Overlay permission not granted, showing explanation dialog")
             uiCallback.showOverlayPermissionExplanation()
             return

@@ -12,6 +12,18 @@ import java.util.UUID
 sealed class PaymentState {
 
     /**
+     * The facts every non-idle payment carries, on every state: which
+     * payment (its transaction id), to whom (phone number), and for how
+     * much (amount). [Idle] alone implements nothing — before a payment
+     * starts there are no facts to carry.
+     */
+    interface SessionData {
+        val transactionId: String
+        val phoneNumber: String
+        val amount: String
+    }
+
+    /**
      * Initial state when no payment is in progress
      */
     object Idle : PaymentState()
@@ -23,10 +35,10 @@ sealed class PaymentState {
      * @param transactionId Unique transaction identifier
      */
     data class Initiating(
-        val phoneNumber: String,
-        val amount: String,
-        val transactionId: String = UUID.randomUUID().toString()
-    ) : PaymentState()
+        override val phoneNumber: String,
+        override val amount: String,
+        override val transactionId: String = UUID.randomUUID().toString()
+    ) : PaymentState(), SessionData
 
     /**
      * State when UPI123 call is in progress
@@ -39,10 +51,10 @@ sealed class PaymentState {
     data class InProgress(
         val step: String,
         val progress: Float,
-        val phoneNumber: String,
-        val amount: String,
-        val transactionId: String
-    ) : PaymentState()
+        override val phoneNumber: String,
+        override val amount: String,
+        override val transactionId: String
+    ) : PaymentState(), SessionData
 
     /**
      * State when waiting for bank verification call
@@ -53,10 +65,10 @@ sealed class PaymentState {
      */
     data class WaitingForVerification(
         val timeout: Long,
-        val phoneNumber: String,
-        val amount: String,
-        val transactionId: String
-    ) : PaymentState()
+        override val phoneNumber: String,
+        override val amount: String,
+        override val transactionId: String
+    ) : PaymentState(), SessionData
 
     /**
      * State when payment is successfully completed
@@ -67,12 +79,12 @@ sealed class PaymentState {
      * @param timestamp Completion timestamp
      */
     data class Success(
-        val transactionId: String,
-        val phoneNumber: String,
-        val amount: String,
+        override val transactionId: String,
+        override val phoneNumber: String,
+        override val amount: String,
         val bankReference: String? = null,
         val timestamp: Long = System.currentTimeMillis()
-    ) : PaymentState()
+    ) : PaymentState(), SessionData
 
     /**
      * State when payment fails
@@ -86,11 +98,11 @@ sealed class PaymentState {
     data class Failed(
         val error: String,
         val errorCode: String? = null,
-        val phoneNumber: String,
-        val amount: String,
-        val transactionId: String,
+        override val phoneNumber: String,
+        override val amount: String,
+        override val transactionId: String,
         val canRetry: Boolean = true
-    ) : PaymentState()
+    ) : PaymentState(), SessionData
 
     /**
      * Terminal state when a bank SMS arrived during the payment but did not
@@ -101,10 +113,10 @@ sealed class PaymentState {
      * @param amount The payment amount that was requested
      */
     data class NeedsReview(
-        val transactionId: String,
-        val phoneNumber: String,
-        val amount: String
-    ) : PaymentState()
+        override val transactionId: String,
+        override val phoneNumber: String,
+        override val amount: String
+    ) : PaymentState(), SessionData
 
     /**
      * State when payment is cancelled by user
@@ -114,11 +126,11 @@ sealed class PaymentState {
      * @param reason Reason for cancellation
      */
     data class Cancelled(
-        val phoneNumber: String,
-        val amount: String,
-        val transactionId: String,
+        override val phoneNumber: String,
+        override val amount: String,
+        override val transactionId: String,
         val reason: String = "User cancelled"
-    ) : PaymentState()
+    ) : PaymentState(), SessionData
 
     /**
      * State when payment is in a timeout scenario
@@ -129,10 +141,10 @@ sealed class PaymentState {
      */
     data class Timeout(
         val timeoutType: TimeoutType,
-        val phoneNumber: String,
-        val amount: String,
-        val transactionId: String
-    ) : PaymentState()
+        override val phoneNumber: String,
+        override val amount: String,
+        override val transactionId: String
+    ) : PaymentState(), SessionData
 
     /**
      * Checks if the payment is in a terminal state (Success, Failed, Cancelled)
@@ -156,47 +168,17 @@ sealed class PaymentState {
     /**
      * Gets the transaction ID if available
      */
-    fun getTransactionIdValue(): String? = when (this) {
-        is Initiating -> this.transactionId
-        is InProgress -> this.transactionId
-        is WaitingForVerification -> this.transactionId
-        is Success -> this.transactionId
-        is Failed -> this.transactionId
-        is NeedsReview -> this.transactionId
-        is Cancelled -> this.transactionId
-        is Timeout -> this.transactionId
-        else -> null
-    }
+    fun getTransactionIdValue(): String? = (this as? SessionData)?.transactionId
 
     /**
      * Gets the phone number if available
      */
-    fun getPhoneNumberValue(): String? = when (this) {
-        is Initiating -> this.phoneNumber
-        is InProgress -> this.phoneNumber
-        is WaitingForVerification -> this.phoneNumber
-        is Success -> this.phoneNumber
-        is Failed -> this.phoneNumber
-        is NeedsReview -> this.phoneNumber
-        is Cancelled -> this.phoneNumber
-        is Timeout -> this.phoneNumber
-        else -> null
-    }
+    fun getPhoneNumberValue(): String? = (this as? SessionData)?.phoneNumber
 
     /**
      * Gets the amount if available
      */
-    fun getAmountValue(): String? = when (this) {
-        is Initiating -> this.amount
-        is InProgress -> this.amount
-        is WaitingForVerification -> this.amount
-        is Success -> this.amount
-        is Failed -> this.amount
-        is NeedsReview -> this.amount
-        is Cancelled -> this.amount
-        is Timeout -> this.amount
-        else -> null
-    }
+    fun getAmountValue(): String? = (this as? SessionData)?.amount
 }
 
 /**
@@ -207,31 +189,4 @@ enum class TimeoutType {
     BANK_VERIFICATION,
     USER_RESPONSE,
     NETWORK_CONNECTION
-}
-
-/**
- * Extension functions for PaymentState
- */
-fun PaymentState.getDisplayMessage(): String = when (this) {
-    is PaymentState.Idle -> "Ready to make payment"
-    is PaymentState.Initiating -> "Initiating payment..."
-    is PaymentState.InProgress -> "Processing: $step"
-    is PaymentState.WaitingForVerification -> "Waiting for bank verification..."
-    is PaymentState.Success -> "Payment successful!"
-    is PaymentState.Failed -> "Payment failed: $error"
-    is PaymentState.NeedsReview -> "Payment needs review — check your bank statement"
-    is PaymentState.Cancelled -> "Payment cancelled: $reason"
-    is PaymentState.Timeout -> "Payment timeout: ${timeoutType.name}"
-}
-
-fun PaymentState.getProgressPercentage(): Float = when (this) {
-    is PaymentState.Idle -> 0f
-    is PaymentState.Initiating -> 0.1f
-    is PaymentState.InProgress -> progress
-    is PaymentState.WaitingForVerification -> 0.7f
-    is PaymentState.Success -> 1f
-    is PaymentState.Failed -> 0f
-    is PaymentState.NeedsReview -> 1f
-    is PaymentState.Cancelled -> 0f
-    is PaymentState.Timeout -> 0f
 }

@@ -80,14 +80,6 @@ val FlowpayStatusWarning = Color(0xFFFF9800)
  *  deliberately neither success-green nor failure-red. */
 val FlowpayStatusNeutral = Color(0xFF9E9E9E)
 
-/**
- * The single mapping from a [com.flowpay.app.data.TransactionStatus] string
- * to its display color. Replaces the byte-identical getStatusColor()
- * functions that had been copy-pasted into multiple screens.
- */
-fun statusColor(status: String): Color = when (status.uppercase()) {
-    "SUCCESS", "SUCCESSFUL", "COMPLETED" -> FlowpayStatusSuccess
-    "FAILED", "DECLINED" -> FlowpayStatusError
-    "PENDING", "NEEDS_REVIEW" -> FlowpayStatusWarning
-    else -> FlowpayStatusNeutral // UNVERIFIED, CANCELLED, unknown
-}
+// The word → color mapping moved to the PaymentStatus module in
+// ui/status (ADR-0001) so every renderer asks one interface. The tokens
+// above remain the palette that module draws from.

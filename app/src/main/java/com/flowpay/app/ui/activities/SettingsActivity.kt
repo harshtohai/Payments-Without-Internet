@@ -14,6 +14,7 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -43,6 +44,7 @@ import com.flowpay.app.BuildConfig
 import com.flowpay.app.FlowpayApplication
 import com.flowpay.app.R
 import com.flowpay.app.SetupActivity
+import com.flowpay.app.data.BankDirectory
 import com.flowpay.app.data.SettingsRepository
 import com.flowpay.app.repository.TransactionRepository
 import com.flowpay.app.ui.theme.BlueAccentTheme
@@ -113,10 +115,11 @@ fun FlowpaySettingsTheme(content: @Composable () -> Unit) {
     }
 }
 
-// Data Classes
+// Data Classes. Bank carries only the persisted id: BankDirectory owns the
+// one bank-name vocabulary (ADR-0002), resolved at display time — this
+// screen once duplicated all ten names as literals.
 data class Bank(
-    val id: String,
-    val name: String
+    val id: String
 )
 
 data class SettingsState(
@@ -129,18 +132,20 @@ data class SettingsState(
     val permissions: Map<String, Boolean> = emptyMap()
 )
 
-// Bank Data
+// Bank Data — ids only; the display name comes from BankDirectory. The
+// order is preserved as-is (HDFC first) because banks.first() is the
+// fallback shown when no saved bank matches.
 val banks = listOf(
-    Bank("hdfc", "HDFC Bank"),
-    Bank("sbi", "State Bank of India"),
-    Bank("icici", "ICICI Bank"),
-    Bank("axis", "Axis Bank"),
-    Bank("kotak", "Kotak Mahindra Bank"),
-    Bank("pnb", "Punjab National Bank"),
-    Bank("bob", "Bank of Baroda"),
-    Bank("yes", "Yes Bank"),
-    Bank("idbi", "IDBI Bank"),
-    Bank("canara", "Canara Bank")
+    Bank("hdfc"),
+    Bank("sbi"),
+    Bank("icici"),
+    Bank("axis"),
+    Bank("kotak"),
+    Bank("pnb"),
+    Bank("bob"),
+    Bank("yes"),
+    Bank("idbi"),
+    Bank("canara")
 )
 
 // ViewModel
@@ -274,19 +279,19 @@ fun SettingsScreen(
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
                 // ═══ CONFIGURATION ═══
-                item { SectionHeader("CONFIGURATION") }
+                item { SectionHeader(R.string.settings_section_configuration) }
                 item {
                     GroupCard {
                         SettingsRow(
                             icon = Icons.Default.AccountBalance,
-                            title = "Bank",
-                            value = state.selectedBank.name,
+                            titleRes = R.string.label_bank,
+                            value = stringResource(BankDirectory.name(state.selectedBank.id)),
                             onClick = { showBankPicker = true }
                         )
                         GroupDivider()
                         SettingsRow(
                             icon = Icons.Default.SimCard,
-                            title = "Primary SIM",
+                            titleRes = R.string.setup_primary_sim,
                             value = primarySim,
                             onClick = { showSimPicker = true }
                         )
@@ -295,13 +300,13 @@ fun SettingsScreen(
 
                 // ═══ PERMISSIONS ═══
                 item { Spacer(modifier = Modifier.height(8.dp)) }
-                item { SectionHeader("PERMISSIONS") }
+                item { SectionHeader(R.string.settings_section_permissions) }
                 item {
                     GroupCard {
                         PermissionRow(
                             icon = Icons.Default.Phone,
-                            title = "Phone",
-                            subtitle = "Calls & phone state",
+                            titleRes = R.string.settings_permission_phone,
+                            subtitleRes = R.string.settings_permission_phone_desc,
                             granted = state.permissions["phone"] ?: false,
                             onRequest = {
                                 onRequestPermissions(
@@ -315,8 +320,8 @@ fun SettingsScreen(
                         GroupDivider()
                         PermissionRow(
                             icon = Icons.Default.CameraAlt,
-                            title = "Camera",
-                            subtitle = "QR code scanning",
+                            titleRes = R.string.settings_permission_camera,
+                            subtitleRes = R.string.settings_permission_camera_desc,
                             granted = state.permissions["camera"] ?: false,
                             onRequest = {
                                 onRequestPermissions(arrayOf(Manifest.permission.CAMERA))
@@ -325,8 +330,8 @@ fun SettingsScreen(
                         GroupDivider()
                         PermissionRow(
                             icon = Icons.Default.Sms,
-                            title = "SMS",
-                            subtitle = "Bank payment confirmations",
+                            titleRes = R.string.settings_permission_sms,
+                            subtitleRes = R.string.settings_permission_sms_desc,
                             granted = state.permissions["sms"] ?: false,
                             onRequest = {
                                 onRequestPermissions(arrayOf(Manifest.permission.RECEIVE_SMS))
@@ -335,8 +340,8 @@ fun SettingsScreen(
                         GroupDivider()
                         PermissionRow(
                             icon = Icons.Default.Contacts,
-                            title = "Contacts",
-                            subtitle = "Pay by contact",
+                            titleRes = R.string.settings_permission_contacts,
+                            subtitleRes = R.string.settings_permission_contacts_desc,
                             granted = state.permissions["contacts"] ?: false,
                             onRequest = {
                                 onRequestPermissions(arrayOf(Manifest.permission.READ_CONTACTS))
@@ -347,13 +352,13 @@ fun SettingsScreen(
 
                 // ═══ ACTIONS ═══
                 item { Spacer(modifier = Modifier.height(8.dp)) }
-                item { SectionHeader("ACTIONS") }
+                item { SectionHeader(R.string.settings_section_actions) }
                 item {
                     GroupCard {
                         SettingsRow(
                             icon = Icons.Default.DeleteForever,
-                            title = "Clear App Data",
-                            value = "Reset all settings",
+                            titleRes = R.string.settings_clear_data_title,
+                            value = stringResource(R.string.settings_clear_data_summary),
                             destructive = true,
                             onClick = { showClearDataConfirm = true }
                         )
@@ -362,12 +367,12 @@ fun SettingsScreen(
 
                 // ═══ ABOUT ═══
                 item { Spacer(modifier = Modifier.height(8.dp)) }
-                item { SectionHeader("ABOUT") }
+                item { SectionHeader(R.string.settings_section_about) }
                 item {
                     GroupCard {
                         SettingsRow(
                             icon = Icons.Default.Info,
-                            title = "Version",
+                            titleRes = R.string.settings_version,
                             // Read from the build, never hardcoded: this row
                             // once said "1.0.0" while the app shipped as 2.1.0.
                             value = BuildConfig.VERSION_NAME
@@ -375,7 +380,7 @@ fun SettingsScreen(
                         GroupDivider()
                         SettingsRow(
                             icon = Icons.Default.PhoneAndroid,
-                            title = "Android",
+                            titleRes = R.string.settings_android,
                             value = Build.VERSION.RELEASE
                         )
                     }
@@ -434,9 +439,7 @@ fun SettingsScreen(
             },
             text = {
                 Text(
-                    "This permanently deletes your entire transaction history and " +
-                        "resets all settings, then returns you to the setup screen. " +
-                        "This cannot be undone.",
+                    stringResource(R.string.settings_clear_data_message),
                     fontSize = 14.sp,
                     lineHeight = 20.sp
                 )
@@ -490,9 +493,9 @@ fun SettingsScreen(
 // ═══════════════════════════════════════════
 
 @Composable
-private fun SectionHeader(title: String) {
+private fun SectionHeader(@StringRes titleRes: Int) {
     Text(
-        text = title,
+        text = stringResource(titleRes),
         fontSize = 12.sp,
         fontWeight = FontWeight.Medium,
         color = FlowpayTextGray,
@@ -524,7 +527,7 @@ private fun GroupDivider() {
 @Composable
 private fun SettingsRow(
     icon: ImageVector,
-    title: String,
+    @StringRes titleRes: Int,
     value: String,
     destructive: Boolean = false,
     onClick: (() -> Unit)? = null
@@ -561,7 +564,7 @@ private fun SettingsRow(
 
         // Title
         Text(
-            text = title,
+            text = stringResource(titleRes),
             fontSize = 15.sp,
             fontWeight = FontWeight.Medium,
             color = titleColor,
@@ -600,8 +603,8 @@ private fun SettingsRow(
 @Composable
 private fun PermissionRow(
     icon: ImageVector,
-    title: String,
-    subtitle: String,
+    @StringRes titleRes: Int,
+    @StringRes subtitleRes: Int,
     granted: Boolean,
     onRequest: () -> Unit
 ) {
@@ -634,13 +637,13 @@ private fun PermissionRow(
         // Title + subtitle
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = title,
+                text = stringResource(titleRes),
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color.White
             )
             Text(
-                text = subtitle,
+                text = stringResource(subtitleRes),
                 fontSize = 12.sp,
                 color = FlowpayTextLightGray
             )
@@ -653,7 +656,7 @@ private fun PermissionRow(
                 color = FlowpayAccentGreenBright.copy(alpha = 0.12f)
             ) {
                 Text(
-                    text = "Granted",
+                    text = stringResource(R.string.settings_permission_granted),
                     color = FlowpayAccentGreenBright,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
@@ -667,7 +670,7 @@ private fun PermissionRow(
                 modifier = Modifier.clickable(onClick = onRequest)
             ) {
                 Text(
-                    text = "Grant",
+                    text = stringResource(R.string.action_grant),
                     color = accent.primary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
@@ -695,7 +698,7 @@ private fun BankPickerDialog(
                 modifier = Modifier.padding(vertical = 20.dp)
             ) {
                 Text(
-                    text = "Select Bank",
+                    text = stringResource(R.string.setup_select_bank),
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White,
@@ -715,7 +718,7 @@ private fun BankPickerDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = bank.name,
+                                text = stringResource(BankDirectory.name(bank.id)),
                                 fontSize = 15.sp,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (isSelected) accent.primary else Color.White,
@@ -724,7 +727,7 @@ private fun BankPickerDialog(
                             if (isSelected) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
-                                    contentDescription = "Selected",
+                                    contentDescription = stringResource(R.string.cd_selected),
                                     tint = accent.primary,
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -776,7 +779,7 @@ private fun SimPickerDialog(
         ) {
             Column(modifier = Modifier.padding(vertical = 20.dp)) {
                 Text(
-                    text = "Select Primary SIM",
+                    text = stringResource(R.string.settings_select_primary_sim),
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White,
@@ -802,7 +805,7 @@ private fun SimPickerDialog(
                         if (isSelected) {
                             Icon(
                                 imageVector = Icons.Default.Check,
-                                contentDescription = "Selected",
+                                contentDescription = stringResource(R.string.cd_selected),
                                 tint = accent.primary,
                                 modifier = Modifier.size(20.dp)
                             )

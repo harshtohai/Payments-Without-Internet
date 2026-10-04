@@ -14,7 +14,6 @@ import android.telephony.PhoneStateListener
 import android.telephony.TelephonyManager
 import android.util.Log
 import android.widget.Toast
-import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import com.flowpay.app.R
 import com.flowpay.app.constants.AppConstants
@@ -41,7 +40,8 @@ class CallManager(private val context: Context) {
     private var isAudioMuted = false
 
     // Call state tracking - thread-safe with proper synchronization
-    private var _isCallInProgress = mutableStateOf(false)
+    @Volatile
+    private var _isCallInProgress = false
 
     @Volatile
     private var currentCallType: CallType? = null
@@ -119,7 +119,7 @@ class CallManager(private val context: Context) {
         synchronized(callStateLock) {
             currentCallType = callType
             setCallEndedCallback(onCallEnded)
-            _isCallInProgress.value = true
+            _isCallInProgress = true
         }
 
         // Create and register phone state listener for non-USSD calls
@@ -140,7 +140,7 @@ class CallManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initiate call", e)
             synchronized(callStateLock) {
-                _isCallInProgress.value = false
+                _isCallInProgress = false
                 currentCallType = null
                 clearCallbacks()
             }
@@ -172,7 +172,7 @@ class CallManager(private val context: Context) {
 
         // Set up USSD callback
         setUssdSessionCompleteCallback(onUssdComplete)
-        _isCallInProgress.value = true
+        _isCallInProgress = true
         currentCallType = CallType.USSD
 
         Log.d(TAG, "Starting USSD call: $ussdCode")
@@ -183,7 +183,7 @@ class CallManager(private val context: Context) {
                 if (callType == CallType.USSD) {
                     isUSSDDialPending.set(false)
                     synchronized(callStateLock) {
-                        _isCallInProgress.value = false
+                        _isCallInProgress = false
                         currentCallType = null
                         getUssdSessionCompleteCallback()?.invoke()
                         clearCallbacks()
@@ -208,7 +208,7 @@ class CallManager(private val context: Context) {
             Log.e(TAG, "Failed to initiate USSD call", e)
             isUSSDDialPending.set(false)
             synchronized(callStateLock) {
-                _isCallInProgress.value = false
+                _isCallInProgress = false
                 currentCallType = null
                 getUssdSessionCompleteCallback()?.invoke()
                 clearCallbacks()
@@ -234,10 +234,10 @@ class CallManager(private val context: Context) {
 
                 when (state) {
                     TelephonyManager.CALL_STATE_IDLE -> {
-                        if (_isCallInProgress.value) {
+                        if (_isCallInProgress) {
                             // Call ended
                             synchronized(callStateLock) {
-                                _isCallInProgress.value = false
+                                _isCallInProgress = false
                                 currentCallType?.let { callType ->
                                     getCallEndedCallback()?.invoke(callType)
                                 }
@@ -247,8 +247,8 @@ class CallManager(private val context: Context) {
                         }
                     }
                     TelephonyManager.CALL_STATE_OFFHOOK -> {
-                        if (!_isCallInProgress.value) {
-                            _isCallInProgress.value = true
+                        if (!_isCallInProgress) {
+                            _isCallInProgress = true
                         }
                     }
                     TelephonyManager.CALL_STATE_RINGING -> {
@@ -264,7 +264,7 @@ class CallManager(private val context: Context) {
      */
     fun endCall() {
         synchronized(callStateLock) {
-            _isCallInProgress.value = false
+            _isCallInProgress = false
             currentCallType = null
             clearCallbacks()
         }
@@ -275,29 +275,6 @@ class CallManager(private val context: Context) {
                 telephonyManager.listen(listener, PhoneStateListener.LISTEN_NONE)
             }
             phoneStateListener = null
-        }
-    }
-
-    /**
-     * Checks if call is in progress
-     */
-    fun isCallInProgress(): Boolean = _isCallInProgress.value
-
-    /**
-     * Constructs the UPI123 call string in the format: tel:<serviceNumber>,,1,<phoneNumber>,,<amount>,,1
-     * Validation and construction live in the pure, unit-tested Upi123CallStringBuilder.
-     */
-    fun constructUPI123CallString(phoneNumber: String, amount: String): String {
-        return when (
-            val result = Upi123CallStringBuilder.build(
-                AppConstants.DEFAULT_UPI_SERVICE_NUMBER,
-                phoneNumber,
-                amount
-            )
-        ) {
-            is Upi123CallStringBuilder.Result.Valid -> result.callString
-            is Upi123CallStringBuilder.Result.Invalid ->
-                throw IllegalArgumentException(result.reason.name)
         }
     }
 
@@ -542,32 +519,6 @@ class CallManager(private val context: Context) {
     }
 
     /**
-     * Shows the call overlay for UPI123 protection using the new service
-     */
-    fun showCallOverlay(phoneNumber: String, amount: String) {
-        try {
-            // Use the new CallOverlayService instead of activity
-            com.flowpay.app.services.CallOverlayService.showOverlay(context, phoneNumber, amount)
-            Log.d(TAG, "Call overlay shown via service")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to show call overlay", e)
-        }
-    }
-
-    /**
-     * Hides the call overlay using the new service
-     */
-    fun hideCallOverlay() {
-        try {
-            // Use the new CallOverlayService instead of activity
-            com.flowpay.app.services.CallOverlayService.hideOverlay(context)
-            Log.d(TAG, "Call overlay hidden via service")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to hide call overlay", e)
-        }
-    }
-
-    /**
      * Terminates the active call via TelecomManager.endCall().
      *
      * Requires the ANSWER_PHONE_CALLS runtime permission; without it this
@@ -595,7 +546,7 @@ class CallManager(private val context: Context) {
             Log.d(TAG, "TelecomManager.endCall() -> $terminated")
             if (terminated) {
                 synchronized(callStateLock) {
-                    _isCallInProgress.value = false
+                    _isCallInProgress = false
                     currentCallType = null
                 }
             }
@@ -631,7 +582,7 @@ class CallManager(private val context: Context) {
                 // Clear all callbacks and state
                 clearCallbacks()
                 currentCallType = null
-                _isCallInProgress.value = false
+                _isCallInProgress = false
             } catch (e: Exception) {
                 Log.e(TAG, "Error during state cleanup", e)
             }

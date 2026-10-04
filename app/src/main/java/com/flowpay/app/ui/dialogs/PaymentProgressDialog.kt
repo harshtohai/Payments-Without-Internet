@@ -3,6 +3,7 @@
 
 package com.flowpay.app.ui.dialogs
 
+import androidx.annotation.StringRes
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -16,8 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -35,10 +34,31 @@ import com.flowpay.app.ui.theme.FlowpayTextPale
 import com.flowpay.app.ui.theme.LocalFlowpayAccentTheme
 import kotlinx.coroutines.delay
 
+/**
+ * Setup/progress dialog for a payment rail ([PaymentRail.Ussd],
+ * [PaymentRail.Upi123]).
+ *
+ * Merges the former Ussd/Upi123 twins, which shared their pulse animation,
+ * skeleton, two-button configuration branch and 3-second shortcut reveal;
+ * everything that differed lives on [rail]. Zero behavior change: each rail
+ * renders exactly what its former dedicated dialog rendered.
+ *
+ * The rail's accent is routed through the theme seam: a rail with its own
+ * [PaymentRail.accentTheme] (UPI 123's green branding) provides it for the
+ * content, one without (USSD) inherits the ambient theme, and every accent
+ * usage inside reads [LocalFlowpayAccentTheme] — so rail branding can be
+ * re-themed without touching this file.
+ *
+ * [progressMessage] overrides the rail's default progress line (USSD shows a
+ * live, caller-supplied message); [onDoesNotWork] is USSD-only — rails
+ * without that shortcut never render the button.
+ */
+@Suppress("LongParameterList") // exact union of the two merged twins' parameters
 @Composable
-fun UssdProgressDialog(
+fun PaymentProgressDialog(
+    rail: PaymentRail,
     isVisible: Boolean,
-    progressMessage: String = stringResource(R.string.ussd_dlg_initializing),
+    progressMessage: String? = null,
     showConfigurationOptions: Boolean = false,
     onConfigured: () -> Unit = {},
     onNotConfigured: () -> Unit = {},
@@ -54,27 +74,91 @@ fun UssdProgressDialog(
                 usePlatformDefaultWidth = false
             )
         ) {
-            UssdProgressDialogContent(
-                progressMessage = progressMessage,
-                showConfigurationOptions = showConfigurationOptions,
-                onConfigured = onConfigured,
-                onNotConfigured = onNotConfigured,
-                onDismiss = onDismiss,
-                onDoesNotWork = onDoesNotWork
-            )
+            val themedContent: @Composable () -> Unit = {
+                PaymentProgressDialogContent(
+                    rail = rail,
+                    progressMessage = progressMessage,
+                    showConfigurationOptions = showConfigurationOptions,
+                    onConfigured = onConfigured,
+                    onNotConfigured = onNotConfigured,
+                    onDismiss = onDismiss,
+                    onDoesNotWork = onDoesNotWork
+                )
+            }
+            val accentTheme = rail.accentTheme
+            if (accentTheme != null) {
+                CompositionLocalProvider(LocalFlowpayAccentTheme provides accentTheme) {
+                    themedContent()
+                }
+            } else {
+                themedContent()
+            }
         }
     }
 }
 
+/**
+ * The per-rail copy of [PaymentProgressDialog]. The two rails' dialogs are
+ * otherwise identical, so the merged skeleton switches on the rail exactly
+ * once, here.
+ */
+private data class RailCopy(
+    @StringRes val iconContentDescription: Int,
+    @StringRes val closeContentDescription: Int,
+    @StringRes val settingUpTitle: Int,
+    @StringRes val settingUpBody: Int,
+    @StringRes val setupCompleteTitle: Int,
+    @StringRes val setupCompleteBody: Int,
+    @StringRes val defaultProgressMessage: Int,
+    @StringRes val notYetLabel: Int,
+    @StringRes val yesLabel: Int,
+    @StringRes val alreadySetUpLabel: Int
+)
+
+private fun PaymentRail.railCopy(): RailCopy = when (this) {
+    PaymentRail.Ussd -> RailCopy(
+        iconContentDescription = R.string.ussd_dlg_cd_ussd_setup,
+        closeContentDescription = R.string.ussd_dlg_cd_close,
+        settingUpTitle = R.string.ussd_dlg_setting_up_title,
+        settingUpBody = R.string.ussd_dlg_setting_up_body,
+        setupCompleteTitle = R.string.ussd_dlg_setup_complete_title,
+        setupCompleteBody = R.string.ussd_dlg_setup_complete_body,
+        defaultProgressMessage = R.string.ussd_dlg_initializing,
+        notYetLabel = R.string.ussd_dlg_not_yet,
+        yesLabel = R.string.ussd_dlg_yes,
+        alreadySetUpLabel = R.string.ussd_dlg_already_set_up
+    )
+
+    PaymentRail.Upi123 -> RailCopy(
+        iconContentDescription = R.string.upi123_dlg_setup_icon_desc,
+        closeContentDescription = R.string.upi123_dlg_close,
+        settingUpTitle = R.string.upi123_dlg_setting_up_title,
+        settingUpBody = R.string.upi123_dlg_ivr_triggered_message,
+        setupCompleteTitle = R.string.upi123_dlg_setup_complete_title,
+        setupCompleteBody = R.string.upi123_dlg_setup_complete_message,
+        defaultProgressMessage = R.string.upi123_dlg_configuring,
+        notYetLabel = R.string.upi123_dlg_not_yet,
+        yesLabel = R.string.upi123_dlg_yes,
+        alreadySetUpLabel = R.string.upi123_dlg_already_set_up
+    )
+}
+
+// Verbatim merge of the two former twins: every line reproduces one of them
+// exactly, including their one remaining pixel delta (noted below).
+// Splitting it back into sub-composables would just re-create the twin
+// split this file exists to delete.
+@Suppress("LongMethod", "LongParameterList")
 @Composable
-private fun UssdProgressDialogContent(
-    progressMessage: String,
-    showConfigurationOptions: Boolean = false,
-    onConfigured: () -> Unit = {},
-    onNotConfigured: () -> Unit = {},
-    onDismiss: () -> Unit = {},
-    onDoesNotWork: () -> Unit = {}
+private fun PaymentProgressDialogContent(
+    rail: PaymentRail,
+    progressMessage: String?,
+    showConfigurationOptions: Boolean,
+    onConfigured: () -> Unit,
+    onNotConfigured: () -> Unit,
+    onDismiss: () -> Unit,
+    onDoesNotWork: () -> Unit
 ) {
+    val copy = rail.railCopy()
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val alpha by infiniteTransition.animateFloat(
         initialValue = 0.6f,
@@ -112,8 +196,8 @@ private fun UssdProgressDialogContent(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = PhoneIcon,
-                        contentDescription = stringResource(R.string.ussd_dlg_cd_ussd_setup),
+                        imageVector = rail.icon,
+                        contentDescription = stringResource(copy.iconContentDescription),
                         tint = LocalFlowpayAccentTheme.current.accent,
                         modifier = Modifier.size(48.dp)
                     )
@@ -123,9 +207,9 @@ private fun UssdProgressDialogContent(
 
                 Text(
                     text = if (showConfigurationOptions) {
-                        stringResource(R.string.ussd_dlg_setup_complete_title)
+                        stringResource(copy.setupCompleteTitle)
                     } else {
-                        stringResource(R.string.ussd_dlg_setting_up_title)
+                        stringResource(copy.settingUpTitle)
                     },
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
@@ -137,9 +221,9 @@ private fun UssdProgressDialogContent(
 
                 Text(
                     text = if (showConfigurationOptions) {
-                        stringResource(R.string.ussd_dlg_setup_complete_body)
+                        stringResource(copy.setupCompleteBody)
                     } else {
-                        stringResource(R.string.ussd_dlg_setting_up_body)
+                        stringResource(copy.settingUpBody)
                     },
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
@@ -166,7 +250,7 @@ private fun UssdProgressDialogContent(
                             )
                         ) {
                             Text(
-                                text = stringResource(R.string.ussd_dlg_not_yet),
+                                text = stringResource(copy.notYetLabel),
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White,
@@ -185,7 +269,7 @@ private fun UssdProgressDialogContent(
                             )
                         ) {
                             Text(
-                                text = stringResource(R.string.ussd_dlg_yes),
+                                text = stringResource(copy.yesLabel),
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White,
@@ -205,18 +289,19 @@ private fun UssdProgressDialogContent(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = progressMessage,
+                        text = progressMessage ?: stringResource(copy.defaultProgressMessage),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Light,
                         color = FlowpayTextGray.copy(alpha = alpha),
                         textAlign = TextAlign.Center
                     )
 
-                    // After a short delay, offer two shortcuts: confirm it's
-                    // already set up, or report it isn't working. Delayed so
-                    // neither tempts an action before USSD has had time to
-                    // respond (mirrors the UPI 123 dialog's delayed shortcut).
-                    // Neither touches the ongoing call.
+                    // After a short delay, offer a shortcut to users who
+                    // already have this rail set up: confirm without waiting
+                    // for the whole call flow — and, on USSD only, report it
+                    // isn't working. Delayed so neither tempts an action
+                    // before the rail has had time to respond. Neither
+                    // shortcut touches the ongoing call.
                     var showShortcuts by remember { mutableStateOf(false) }
                     LaunchedEffect(Unit) {
                         delay(3000)
@@ -225,11 +310,14 @@ private fun UssdProgressDialogContent(
                     if (showShortcuts) {
                         Spacer(modifier = Modifier.height(20.dp))
 
+                        // The twins' only pixel deltas, preserved exactly:
+                        // UPI 123 drew this button 50dp tall with centered
+                        // text, USSD 48dp with start-aligned text.
                         OutlinedButton(
                             onClick = onConfigured,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(48.dp),
+                                .height(if (rail == PaymentRail.Upi123) 50.dp else 48.dp),
                             shape = RoundedCornerShape(15.dp),
                             border = BorderStroke(1.dp, LocalFlowpayAccentTheme.current.accent),
                             colors = ButtonDefaults.outlinedButtonColors(
@@ -237,30 +325,33 @@ private fun UssdProgressDialogContent(
                             )
                         ) {
                             Text(
-                                text = stringResource(R.string.ussd_dlg_already_set_up),
+                                text = stringResource(copy.alreadySetUpLabel),
                                 fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = if (rail == PaymentRail.Upi123) TextAlign.Center else null
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        if (rail == PaymentRail.Ussd) {
+                            Spacer(modifier = Modifier.height(12.dp))
 
-                        OutlinedButton(
-                            onClick = onDoesNotWork,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp),
-                            shape = RoundedCornerShape(15.dp),
-                            border = BorderStroke(1.dp, FlowpayOutlineGray),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = FlowpayTextPale
-                            )
-                        ) {
-                            Text(
-                                text = stringResource(R.string.ussd_dlg_does_not_work),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            OutlinedButton(
+                                onClick = onDoesNotWork,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(15.dp),
+                                border = BorderStroke(1.dp, FlowpayOutlineGray),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = FlowpayTextPale
+                                )
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.ussd_dlg_does_not_work),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
                 }
@@ -275,7 +366,7 @@ private fun UssdProgressDialogContent(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Close,
-                    contentDescription = stringResource(R.string.ussd_dlg_cd_close),
+                    contentDescription = stringResource(copy.closeContentDescription),
                     tint = FlowpayTextLightGray,
                     modifier = Modifier.size(22.dp)
                 )
@@ -283,53 +374,3 @@ private fun UssdProgressDialogContent(
         }
     }
 }
-
-// Custom Phone Icon
-val PhoneIcon: ImageVector
-    get() {
-        return ImageVector.Builder(
-            name = "phone",
-            defaultWidth = 24.dp,
-            defaultHeight = 24.dp,
-            viewportWidth = 24f,
-            viewportHeight = 24f
-        ).apply {
-            path(
-                fill = null,
-                stroke = androidx.compose.ui.graphics.SolidColor(Color.White),
-                strokeLineWidth = 2f,
-                strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round,
-                strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round
-            ) {
-                moveTo(22f, 16.92f)
-                verticalLineTo(19.92f)
-                curveTo(22.0011f, 20.1985f, 21.9441f, 20.4742f, 21.8325f, 20.7293f)
-                curveTo(21.7209f, 20.9844f, 21.5573f, 21.2136f, 21.3521f, 21.4019f)
-                curveTo(21.1468f, 21.5901f, 20.9046f, 21.7335f, 20.6407f, 21.8227f)
-                curveTo(20.3769f, 21.9119f, 20.0974f, 21.9451f, 19.82f, 21.92f)
-                curveTo(16.7428f, 21.5856f, 13.787f, 20.5341f, 11.19f, 18.85f)
-                curveTo(8.77382f, 17.3147f, 6.72533f, 15.2662f, 5.19f, 12.85f)
-                curveTo(3.49996f, 10.2412f, 2.44824f, 7.271f, 2.12f, 4.18f)
-                curveTo(2.095f, 3.90347f, 2.12787f, 3.62476f, 2.21649f, 3.36162f)
-                curveTo(2.30512f, 3.09849f, 2.44766f, 2.85669f, 2.63476f, 2.65162f)
-                curveTo(2.82185f, 2.44655f, 3.04924f, 2.28271f, 3.302f, 2.17f)
-                curveTo(3.55476f, 2.05729f, 3.82777f, 2.00026f, 4.1f, 2f)
-                horizontalLineTo(7.1f)
-                curveTo(7.59565f, 1.99522f, 8.06622f, 2.16708f, 8.43306f, 2.48353f)
-                curveTo(8.7999f, 2.79999f, 9.04224f, 3.23945f, 9.12f, 3.72f)
-                curveTo(9.28573f, 4.68007f, 9.51567f, 5.62273f, 9.81f, 6.55f)
-                curveTo(9.94454f, 6.97953f, 9.97366f, 7.43697f, 9.89482f, 7.88189f)
-                curveTo(9.81598f, 8.32681f, 9.63151f, 8.74707f, 9.36f, 9.11f)
-                lineTo(8.09f, 10.81f)
-                curveTo(9.51315f, 13.2072f, 11.3868f, 15.2809f, 13.62f, 16.91f)
-                lineTo(15.32f, 15.64f)
-                curveTo(15.6829f, 15.3685f, 16.1032f, 15.184f, 16.5481f, 15.1052f)
-                curveTo(16.993f, 15.0264f, 17.4504f, 15.0555f, 17.88f, 15.19f)
-                curveTo(18.8073f, 15.4843f, 19.7499f, 15.7143f, 20.71f, 15.88f)
-                curveTo(21.1906f, 15.9578f, 21.6301f, 16.2001f, 21.9465f, 16.5669f)
-                curveTo(22.263f, 16.9338f, 22.4348f, 17.4044f, 22.43f, 17.9f)
-                lineTo(22.43f, 17.9f)
-                close()
-            }
-        }.build()
-    }

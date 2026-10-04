@@ -39,7 +39,7 @@ import com.flowpay.app.ui.theme.FlowpaySurfaceDim
 import com.flowpay.app.ui.theme.FlowpayTextLightGray
 import com.flowpay.app.ui.theme.FlowpayTextPale
 import com.flowpay.app.ui.theme.LocalFlowpayAccentTheme
-import com.flowpay.app.ui.theme.statusColor
+import com.flowpay.app.ui.status.PaymentStatus
 import com.flowpay.app.utils.CurrencyFormat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -53,7 +53,7 @@ fun TransactionDetailDialog(
 ) {
     val clipboardManager = LocalClipboardManager.current
     val accent = LocalFlowpayAccentTheme.current
-    val statusColor = statusColor(transaction.status)
+    val statusColor = PaymentStatus.color(transaction.status)
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {

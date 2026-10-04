@@ -11,6 +11,7 @@ import android.content.Intent
 import android.util.Log
 import com.flowpay.app.R
 import com.flowpay.app.data.TransactionStatus
+import com.flowpay.app.ui.status.PaymentStatus
 import com.flowpay.app.utils.CurrencyFormat
 
 /**
@@ -50,7 +51,7 @@ object PaymentResultNotifier {
             val status = resultIntent.getStringExtra("status") ?: ""
             val amount = resultIntent.getStringExtra("amount") ?: ""
             val bank = resultIntent.getStringExtra("bank_name") ?: ""
-            val title = context.getString(statusTitleRes(status))
+            val title = context.getString(PaymentStatus.notificationTitle(status))
             val text = listOf("₹${CurrencyFormat.inr(amount)}", bank)
                 .filter { it.length > 1 }.joinToString(" — ")
 
@@ -79,10 +80,4 @@ object PaymentResultNotifier {
         }
     }
 
-    private fun statusTitleRes(status: String): Int = when (status.uppercase()) {
-        TransactionStatus.FAILED -> R.string.payment_status_failed
-        TransactionStatus.NEEDS_REVIEW -> R.string.payment_status_needs_review
-        TransactionStatus.UNVERIFIED -> R.string.payment_status_unverified
-        else -> R.string.payment_status_success
-    }
 }

@@ -47,7 +47,7 @@ import com.flowpay.app.ui.theme.FlowpayStatusError
 import com.flowpay.app.ui.theme.FlowpayTextLightGray
 import com.flowpay.app.ui.theme.FlowpayTheme
 import com.flowpay.app.ui.theme.LocalFlowpayAccentTheme
-import com.flowpay.app.ui.theme.statusColor
+import com.flowpay.app.ui.status.PaymentStatus
 import com.flowpay.app.utils.CurrencyFormat
 import com.flowpay.app.viewmodel.TransactionViewModel
 import java.text.SimpleDateFormat
@@ -64,16 +64,6 @@ fun formatDate(timestamp: Long): String {
 fun formatTime(timestamp: Long): String {
     val formatter = SimpleDateFormat("hh:mm a", Locale("en", "IN"))
     return formatter.format(Date(timestamp))
-}
-
-@androidx.annotation.StringRes
-fun statusLabelRes(status: String): Int = when (status.uppercase()) {
-    "SUCCESS", "SUCCESSFUL", "COMPLETED" -> R.string.status_label_success
-    "UNVERIFIED" -> R.string.status_label_unverified
-    "NEEDS_REVIEW" -> R.string.status_label_needs_review
-    "CANCELLED" -> R.string.status_label_cancelled
-    "FAILED", "DECLINED" -> R.string.status_label_failed
-    else -> R.string.status_label_pending
 }
 
 private fun isSameDay(c1: Calendar, c2: Calendar): Boolean =
@@ -289,7 +279,7 @@ fun TransactionHistoryScreen(
                                 IconButton(onClick = { searchQuery = "" }) {
                                     Icon(
                                         imageVector = Icons.Default.Close,
-                                        contentDescription = "Clear",
+                                        contentDescription = stringResource(R.string.action_clear),
                                         tint = FlowpayTextLightGray,
                                         modifier = Modifier.size(18.dp)
                                     )
@@ -349,7 +339,7 @@ fun TransactionHistoryScreen(
                                 }
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
-                                    text = "Something went wrong",
+                                    text = stringResource(R.string.history_error_title),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color.White
@@ -357,7 +347,7 @@ fun TransactionHistoryScreen(
                                 Spacer(modifier = Modifier.height(4.dp))
                                 TextButton(onClick = { transactionViewModel.refresh() }) {
                                     Text(
-                                        "Retry",
+                                        stringResource(R.string.action_retry),
                                         color = accent.primary,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Medium
@@ -391,9 +381,9 @@ fun TransactionHistoryScreen(
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
                                     text = if (searchQuery.isNotEmpty()) {
-                                        "No matching transactions"
+                                        stringResource(R.string.history_no_matches_title)
                                     } else {
-                                        "No transactions yet"
+                                        stringResource(R.string.history_empty_title)
                                     },
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -402,9 +392,9 @@ fun TransactionHistoryScreen(
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = if (searchQuery.isNotEmpty()) {
-                                        "Try a different search"
+                                        stringResource(R.string.history_no_matches_hint)
                                     } else {
-                                        "Transactions will appear here"
+                                        stringResource(R.string.history_empty_hint)
                                     },
                                     fontSize = 13.sp,
                                     color = FlowpayTextLightGray
@@ -478,7 +468,7 @@ private fun TransactionHistoryItem(
     val accent = LocalFlowpayAccentTheme.current
     val displayName = transaction.recipientName?.takeIf { it.isNotEmpty() }
         ?: transaction.phoneNumber?.takeIf { it.isNotEmpty() }
-        ?: "Unknown"
+        ?: stringResource(R.string.label_unknown)
     val initial = displayName.first().uppercaseChar()
 
     Row(
@@ -552,9 +542,9 @@ private fun TransactionAvatar(initial: Char) {
 
 @Composable
 private fun StatusPill(status: String) {
-    val statusColor = statusColor(status)
+    val statusColor = PaymentStatus.color(status)
     Text(
-        text = stringResource(statusLabelRes(status)),
+        text = stringResource(PaymentStatus.label(status)),
         fontSize = 11.sp,
         fontWeight = FontWeight.Medium,
         color = statusColor,

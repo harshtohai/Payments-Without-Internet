@@ -21,6 +21,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.annotation.StringRes
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -107,9 +108,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.flowpay.app.constants.AppConstants
 import com.flowpay.app.constants.PermissionConstants
+import com.flowpay.app.data.BankDirectory
 import com.flowpay.app.data.PaymentDetails
-import com.flowpay.app.data.PaymentStatus
 import com.flowpay.app.data.TestResultsManager
+import com.flowpay.app.data.TransactionStatus
 import com.flowpay.app.helpers.MainActivityHelper
 import com.flowpay.app.managers.PermissionManager
 import com.flowpay.app.payment.Upi123CallStringBuilder
@@ -168,9 +170,9 @@ class MainActivity : ComponentActivity() {
     ) {
         val granted = PermissionManager.canDrawOverlays(this)
         val message = if (granted) {
-            "Overlay permission granted. You can now proceed with the transfer."
+            getString(R.string.status_overlay_permission_granted)
         } else {
-            "Overlay permission is required for payment protection. Please enable it in Settings."
+            getString(R.string.error_overlay_permission_required)
         }
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
@@ -467,7 +469,7 @@ private fun ScanQrButton(
                 .padding(horizontal = 10.dp, vertical = 4.dp)
         ) {
             Text(
-                text = "OR",
+                text = stringResource(R.string.label_or),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color.White.copy(alpha = 0.8f)
@@ -498,6 +500,9 @@ private fun PayContactButton(
     // Pay Contact Button — inactive until the UPI 123 IVR test has
     // passed; in that state it prompts for setup and tapping it opens
     // the *99# / UPI 123 test screen.
+    // One id chosen here feeds both the icon's contentDescription and the
+    // label below; two string branches each would drift apart.
+    val labelRes = if (isUpi123Ready) R.string.home_pay_contact else R.string.home_setup_upi123
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -546,14 +551,14 @@ private fun PayContactButton(
         ) {
             Icon(
                 imageVector = if (isUpi123Ready) Icons.Default.Person else Icons.Default.Lock,
-                contentDescription = if (isUpi123Ready) "Pay Contact" else "Set up UPI 123 IVR",
+                contentDescription = stringResource(labelRes),
                 tint = if (isUpi123Ready) Color.White else Color.White.copy(alpha = 0.5f),
                 modifier = Modifier.size(32.dp)
             )
         }
 
         Text(
-            text = if (isUpi123Ready) "Pay Contact" else "Set up UPI 123 IVR",
+            text = stringResource(labelRes),
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold,
             color = if (isUpi123Ready) Color.White else FlowpayTextLightGray,
@@ -634,7 +639,7 @@ fun MainScreen(
         } else {
             Toast.makeText(
                 context,
-                "SMS permission is required to detect payment confirmations",
+                context.getString(R.string.error_sms_permission_required),
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -698,19 +703,7 @@ fun MainScreen(
         }
     }
 
-    val selectedBankName = when (savedBank) {
-        "sbi" -> "State Bank of India"
-        "hdfc" -> "HDFC Bank"
-        "icici" -> "ICICI Bank"
-        "axis" -> "Axis Bank"
-        "kotak" -> "Kotak Mahindra Bank"
-        "pnb" -> "Punjab National Bank"
-        "bob" -> "Bank of Baroda"
-        "yes" -> "Yes Bank"
-        "idbi" -> "IDBI Bank"
-        "canara" -> "Canara Bank"
-        else -> "HDFC Bank"
-    }
+    val selectedBankName = context.getString(BankDirectory.name(savedBank))
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -776,7 +769,7 @@ fun MainScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Flowpay",
+                                        text = stringResource(R.string.app_name),
                                         fontSize = 24.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White,
@@ -786,7 +779,7 @@ fun MainScreen(
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
-                                        text = "Payments Without Internet",
+                                        text = stringResource(R.string.home_tagline),
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Normal,
                                         color = Color.White.copy(alpha = 0.95f)
@@ -810,7 +803,7 @@ fun MainScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Outlined.Settings,
-                                        contentDescription = "Settings",
+                                        contentDescription = stringResource(R.string.settings_title),
                                         tint = Color.White,
                                         modifier = Modifier.size(24.dp)
                                     )
@@ -838,7 +831,7 @@ fun MainScreen(
                                         verticalArrangement = Arrangement.Center
                                     ) {
                                         Text(
-                                            text = "Connected Bank",
+                                            text = stringResource(R.string.home_connected_bank),
                                             fontSize = 12.sp,
                                             color = Color.White.copy(alpha = 0.85f),
                                             maxLines = 1
@@ -865,7 +858,7 @@ fun MainScreen(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.AccountBalanceWallet,
-                                            contentDescription = "Wallet",
+                                            contentDescription = stringResource(R.string.cd_wallet),
                                             tint = Color.White,
                                             modifier = Modifier.size(26.dp)
                                         )
@@ -965,7 +958,7 @@ fun MainScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.History,
-                                        contentDescription = "History",
+                                        contentDescription = stringResource(R.string.cd_history),
                                         modifier = Modifier.size(20.dp),
                                         tint = LocalFlowpayAccentTheme.current.headerGradientStart
                                     )
@@ -973,13 +966,13 @@ fun MainScreen(
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = "Recent Payments",
+                                        text = stringResource(R.string.home_recent_payments),
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
                                     )
                                     Text(
-                                        text = "Your latest transactions",
+                                        text = stringResource(R.string.home_recent_payments_subtitle),
                                         fontSize = 12.sp,
                                         color = FlowpayTextLightGray
                                     )
@@ -992,7 +985,7 @@ fun MainScreen(
                                 }
                             ) {
                                 Text(
-                                    text = "View All",
+                                    text = stringResource(R.string.action_view_all),
                                     fontSize = 12.sp,
                                     color = LocalFlowpayAccentTheme.current.accent
                                 )
@@ -1016,7 +1009,7 @@ fun MainScreen(
                                     )
                                     Spacer(modifier = Modifier.height(20.dp))
                                     Text(
-                                        text = "Loading transactions...",
+                                        text = stringResource(R.string.status_loading_transactions),
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Medium,
                                         color = FlowpayTextLightGray
@@ -1032,14 +1025,14 @@ fun MainScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
-                                        text = "Failed to load transactions",
+                                        text = stringResource(R.string.error_load_transactions),
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color.White
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
-                                        text = error ?: "Unknown error",
+                                        text = error ?: stringResource(R.string.error_unknown),
                                         fontSize = 13.sp,
                                         color = FlowpayTextLightGray,
                                         textAlign = TextAlign.Center
@@ -1047,7 +1040,7 @@ fun MainScreen(
                                     Spacer(modifier = Modifier.height(16.dp))
                                     TextButton(onClick = { transactionViewModel.refresh() }) {
                                         Text(
-                                            text = "Retry",
+                                            text = stringResource(R.string.action_retry),
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium,
                                             color = LocalFlowpayAccentTheme.current.headerGradientStart
@@ -1071,21 +1064,21 @@ fun MainScreen(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.History,
-                                            contentDescription = "No transactions",
+                                            contentDescription = stringResource(R.string.cd_no_transactions),
                                             modifier = Modifier.size(32.dp),
                                             tint = FlowpayTextLightGray
                                         )
                                     }
                                     Spacer(modifier = Modifier.height(20.dp))
                                     Text(
-                                        text = "No transactions yet",
+                                        text = stringResource(R.string.history_empty_title),
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color.White
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
-                                        text = "Your payment history will appear here",
+                                        text = stringResource(R.string.home_recent_payments_hint),
                                         fontSize = 13.sp,
                                         color = FlowpayTextLightGray,
                                         textAlign = TextAlign.Center
@@ -1149,9 +1142,9 @@ fun MainScreen(
 
             if (showOverlayPermissionDialog) {
                 PermissionExplanationDialog(
-                    title = "Overlay Permission",
-                    message = "Flowpay needs overlay permission to show a payment UI anchor during the call. This keeps your transaction details visible while the call is in progress.",
-                    confirmButtonText = "Grant",
+                    titleRes = R.string.dialog_permission_overlay_title,
+                    messageRes = R.string.dialog_permission_overlay_message,
+                    confirmButtonTextRes = R.string.action_grant,
                     onConfirm = {
                         showOverlayPermissionDialog = false
                         onRequestOverlayPermission()
@@ -1162,9 +1155,9 @@ fun MainScreen(
 
             if (showSmsPermissionDialog) {
                 PermissionExplanationDialog(
-                    title = "SMS Permission",
-                    message = "Flowpay reads incoming bank SMS only while a payment is in progress, to detect the confirmation. It never reads your inbox and nothing leaves the device.",
-                    confirmButtonText = "Grant",
+                    titleRes = R.string.dialog_permission_sms_title,
+                    messageRes = R.string.dialog_permission_sms_message,
+                    confirmButtonTextRes = R.string.action_grant,
                     onConfirm = {
                         showSmsPermissionDialog = false
                         // Only RECEIVE_SMS is declared in the manifest and
@@ -1231,13 +1224,13 @@ fun TransactionItem(payment: PaymentDetails, onClick: () -> Unit) {
 }
 
 @Composable
-private fun TransactionItemAmount(amount: Double, status: PaymentStatus) {
+private fun TransactionItemAmount(amount: Double, status: String) {
     // FAILED and CANCELLED read as "this payment did not go through" — a
     // cross, not the same outgoing arrow a successful payment gets. Every
-    // other outcome (COMPLETED, PENDING, NEEDS_REVIEW, UNVERIFIED) keeps the
+    // other outcome (SUCCESS, PENDING, NEEDS_REVIEW, UNVERIFIED) keeps the
     // arrow: this row has no separate status chip (unlike transaction
     // history), so the icon is the only signal here.
-    val failed = status == PaymentStatus.FAILED || status == PaymentStatus.CANCELLED
+    val failed = status == TransactionStatus.FAILED || status == TransactionStatus.CANCELLED
     val tint = if (failed) FlowpayStatusError else LocalFlowpayAccentTheme.current.headerGradientStart
 
     Row(
@@ -1294,7 +1287,7 @@ fun PayContactDialog(
         containerColor = FlowpayDarkGray,
         title = {
             Text(
-                text = "Pay Contact",
+                text = stringResource(R.string.home_pay_contact),
                 color = Color.White,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold
@@ -1324,7 +1317,7 @@ fun PayContactDialog(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Sending to: $name",
+                                text = stringResource(R.string.home_sending_to, name),
                                 color = LocalFlowpayAccentTheme.current.accent,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Medium
@@ -1371,7 +1364,7 @@ fun PayContactDialog(
                             if (pm == null) {
                                 Toast.makeText(
                                     context.applicationContext,
-                                    "Unable to open contacts from this screen.",
+                                    context.applicationContext.getString(R.string.error_contacts_unavailable),
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 return@IconButton
@@ -1392,7 +1385,7 @@ fun PayContactDialog(
                     ) {
                         Icon(
                             imageVector = Icons.Default.PermContactCalendar,
-                            contentDescription = "Select Contact",
+                            contentDescription = stringResource(R.string.contacts_select_contact),
                             tint = LocalFlowpayAccentTheme.current.accent
                         )
                     }
@@ -1475,9 +1468,9 @@ fun PayContactDialog(
 
     if (showContactPermissionDialog) {
         PermissionExplanationDialog(
-            title = "Contacts Permission",
-            message = "Flowpay needs access to your contacts so you can pick a recipient by name instead of typing their number.",
-            confirmButtonText = "Grant",
+            titleRes = R.string.dialog_permission_contacts_title,
+            messageRes = R.string.dialog_permission_contacts_message,
+            confirmButtonTextRes = R.string.action_grant,
             onConfirm = {
                 showContactPermissionDialog = false
                 contactPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
@@ -1487,11 +1480,20 @@ fun PayContactDialog(
     }
 }
 
+/**
+ * The pre-permission rationale dialog. Its user-visible parameters are
+ * @StringRes ids, never [String]s, and that is the point: every call site
+ * opens its paren on one line and puts the copy on the next, invisible to
+ * the copy gates' line-oriented greps. Typing the seam as a resource id
+ * makes a hardcoded title or message a compile error instead of something
+ * a regex has to be taught to notice — the same enforcement shape as
+ * QRScannerActivity's updateBlackScreenStatus.
+ */
 @Composable
 fun PermissionExplanationDialog(
-    title: String,
-    message: String,
-    confirmButtonText: String,
+    @StringRes titleRes: Int,
+    @StringRes messageRes: Int,
+    @StringRes confirmButtonTextRes: Int,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1500,7 +1502,7 @@ fun PermissionExplanationDialog(
         containerColor = FlowpayDarkGray,
         title = {
             Text(
-                text = title,
+                text = stringResource(titleRes),
                 fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White
@@ -1508,7 +1510,7 @@ fun PermissionExplanationDialog(
         },
         text = {
             Text(
-                text = message,
+                text = stringResource(messageRes),
                 fontSize = 14.sp,
                 color = FlowpayTextPale,
                 lineHeight = 20.sp
@@ -1521,7 +1523,7 @@ fun PermissionExplanationDialog(
                     contentColor = LocalFlowpayAccentTheme.current.accent
                 )
             ) {
-                Text(confirmButtonText)
+                Text(stringResource(confirmButtonTextRes))
             }
         },
         dismissButton = {

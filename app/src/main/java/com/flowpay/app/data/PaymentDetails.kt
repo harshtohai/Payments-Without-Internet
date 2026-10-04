@@ -6,6 +6,9 @@ package com.flowpay.app.data
 /**
  * Data class representing payment transaction details
  * Used for storing and managing payment information
+ *
+ * [status] is the canonical [TransactionStatus] word the row was written
+ * with — never a renderer-local synonym (ADR-0001).
  */
 data class PaymentDetails(
     val id: String,
@@ -13,5 +16,5 @@ data class PaymentDetails(
     val phoneNumber: String,
     val amount: Double,
     val timestamp: Long,
-    val status: PaymentStatus
+    val status: String
 )

@@ -137,27 +137,6 @@ class TransactionViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     /**
-     * Search transactions
-     */
-    fun searchTransactions(query: String): Flow<List<Transaction>> {
-        return repositoryFlow { it.searchTransactions(query) }
-    }
-
-    /**
-     * Get transactions by status
-     */
-    fun getTransactionsByStatus(status: String): Flow<List<Transaction>> {
-        return repositoryFlow { it.getTransactionsByStatus(status) }
-    }
-
-    /**
-     * Get transactions by bank
-     */
-    fun getTransactionsByBank(bankName: String): Flow<List<Transaction>> {
-        return repositoryFlow { it.getTransactionsByBank(bankName) }
-    }
-
-    /**
      * Delete a transaction
      */
     fun deleteTransaction(transaction: Transaction) {

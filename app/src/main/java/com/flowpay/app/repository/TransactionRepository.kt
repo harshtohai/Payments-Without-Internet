@@ -42,13 +42,6 @@ class TransactionRepository private constructor(context: Context) :
     }
 
     /**
-     * Get recent transactions (last 10 by default)
-     */
-    fun getRecentTransactions(limit: Int = 10): Flow<List<Transaction>> {
-        return transactionDao.getRecentTransactions(limit)
-    }
-
-    /**
      * Get recent transactions as PaymentDetails for UI compatibility
      */
     fun getRecentPaymentDetails(limit: Int = 10): Flow<List<com.flowpay.app.data.PaymentDetails>> {
@@ -56,27 +49,6 @@ class TransactionRepository private constructor(context: Context) :
             .map { transactions ->
                 transactions.map { it.toPaymentDetails() }
             }
-    }
-
-    /**
-     * Get transactions by status
-     */
-    fun getTransactionsByStatus(status: String): Flow<List<Transaction>> {
-        return transactionDao.getTransactionsByStatus(status)
-    }
-
-    /**
-     * Get transactions by bank
-     */
-    fun getTransactionsByBank(bankName: String): Flow<List<Transaction>> {
-        return transactionDao.getTransactionsByBank(bankName)
-    }
-
-    /**
-     * Search transactions
-     */
-    fun searchTransactions(query: String): Flow<List<Transaction>> {
-        return transactionDao.searchTransactions("%$query%")
     }
 
     /**
@@ -92,20 +64,6 @@ class TransactionRepository private constructor(context: Context) :
     suspend fun saveTransaction(simpleTransaction: SimpleTransaction) {
         val transaction = Transaction.fromSimpleTransaction(simpleTransaction)
         transactionDao.insertTransaction(transaction)
-    }
-
-    /**
-     * Save multiple transactions
-     */
-    suspend fun saveTransactions(transactions: List<Transaction>) {
-        transactionDao.insertTransactions(transactions)
-    }
-
-    /**
-     * Update a transaction
-     */
-    suspend fun updateTransaction(transaction: Transaction) {
-        transactionDao.updateTransaction(transaction)
     }
 
     /**
@@ -127,27 +85,6 @@ class TransactionRepository private constructor(context: Context) :
      */
     suspend fun deleteAllTransactions() {
         transactionDao.deleteAllTransactions()
-    }
-
-    /**
-     * Get transaction count
-     */
-    suspend fun getTransactionCount(): Int {
-        return transactionDao.getTransactionCount()
-    }
-
-    /**
-     * Get total amount of completed transactions
-     */
-    suspend fun getTotalAmount(): Double? {
-        return transactionDao.getTotalAmount()
-    }
-
-    /**
-     * Get transactions within date range
-     */
-    fun getTransactionsByDateRange(startTime: Long, endTime: Long): Flow<List<Transaction>> {
-        return transactionDao.getTransactionsByDateRange(startTime, endTime)
     }
 
     // PaymentTransactionStore — used by PaymentSessionManager

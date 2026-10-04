@@ -15,7 +15,6 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -26,12 +25,13 @@ import android.widget.TextView
 import android.widget.Toast
 import com.flowpay.app.FlowpayApplication
 import com.flowpay.app.R
+import com.flowpay.app.managers.PermissionManager
+import com.flowpay.app.managers.TerminalDialog
 import com.flowpay.app.managers.TransactionDialogManager
 import com.flowpay.app.payment.PaymentSessionManager
 import com.flowpay.app.states.PaymentState
 import com.flowpay.app.telephony.CallStateCoordinator
 import com.flowpay.app.telephony.DeviceCallState
-import com.flowpay.app.utils.OverlayLogger
 import com.flowpay.app.utils.PhoneNumberUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +59,8 @@ class CallOverlayService : Service() {
         // can never claim the payment is through when it isn't. This is pacing,
         // not the fake step-engine deleted in 88f555e, which asserted outcomes.
         private const val PROGRESS_CONNECTING = 0.10f
-        private const val PROGRESS_IN_CALL_START = 0.20f
+        // The answered-call start fraction (0.20) moved to OverlayPresenter
+        // together with the rest of the state mapping.
         private const val PROGRESS_IN_CALL_CEILING = 0.90f
         private const val PROGRESS_IN_CALL_CREEP_MS = 30000L
         private const val PROGRESS_MILESTONE_ANIM_MS = 1000L
@@ -195,12 +196,7 @@ class CallOverlayService : Service() {
         serviceInstance = this
         serviceStartTime = startTime
 
-        OverlayLogger.logServiceEvent(
-            "SERVICE_CREATED",
-            mapOf(
-                "timestamp" to startTime
-            )
-        )
+        Log.d(TAG, "SERVICE_EVENT: SERVICE_CREATED | Data: {timestamp=$startTime}")
 
         // Initialize timeout handler
         timeoutHandler = Handler(Looper.getMainLooper())
@@ -267,68 +263,32 @@ class CallOverlayService : Service() {
 
     /**
      * Drives overlay content and result dialogs from the payment session.
-     * Duration heuristics never decide outcomes — the session does.
+     * Duration heuristics never decide outcomes — the session does. Every
+     * what-to-show decision comes from [OverlayPresenter]; this method only
+     * renders what it returns.
      */
     private fun onPaymentStateChanged(state: PaymentState) {
         // Any real state change supersedes the in-call pacing.
         cancelProgressPacing()
-        when (state) {
-            is PaymentState.InProgress -> {
-                updateOverlayStatus(
-                    status = "Processing Payment",
-                    step = getString(R.string.overlay_sending_request),
-                    progressFraction = PROGRESS_IN_CALL_START
-                )
-                startInCallPacing()
-            }
-            is PaymentState.WaitingForVerification -> {
-                // The request is genuinely through — this is the only thing
-                // that fills the bar.
-                updateOverlayStatus(
-                    status = "Request Sent",
-                    step = getString(R.string.overlay_request_sent),
-                    progressFraction = 1f
-                )
+
+        val ui = OverlayPresenter.present(state)
+
+        ui.progress?.let {
+            updateOverlayStatus(getString(it.statusTextRes), getString(it.stepTextRes), it.fraction)
+        }
+        if (ui.startInCallPacing) startInCallPacing()
+        if (ui.vibrate) vibrate()
+        if (ui.endCall) endCallOnConfirmation()
+
+        when (ui.finish) {
+            OverlayUi.Finish.None -> Unit
+            OverlayUi.Finish.Now ->
+                finishWithResult { ui.dialog?.let { dialogManager?.show(it) } }
+            OverlayUi.Finish.AfterBarHold ->
                 pacingHandler.postDelayed(
-                    { finishWithResult { dialogManager?.showAwaitingConfirmation() } },
+                    { finishWithResult { ui.dialog?.let { dialogManager?.show(it) } } },
                     PROGRESS_COMPLETE_HOLD_MS
                 )
-            }
-            is PaymentState.Success -> {
-                vibrate()
-                endCallOnConfirmation()
-                // PaymentResultActivity (launched by the SMS pipeline) is the
-                // success surface; no extra dialog from the service.
-                finishWithResult { }
-            }
-            is PaymentState.Failed -> {
-                endCallOnConfirmation()
-                finishWithResult { dialogManager?.showTransactionFailed() }
-            }
-            is PaymentState.NeedsReview -> {
-                endCallOnConfirmation()
-                // PaymentResultActivity (launched by the SMS pipeline with
-                // the NEEDS_REVIEW status extra) is the review surface; no
-                // extra dialog from the service.
-                finishWithResult { }
-            }
-            is PaymentState.Cancelled -> {
-                val byUser = state.reason.contains("by user", ignoreCase = true)
-                finishWithResult {
-                    if (byUser) {
-                        dialogManager?.showTransactionCancelledByUser()
-                    } else {
-                        dialogManager?.showTransactionCancelled()
-                    }
-                }
-            }
-            is PaymentState.Timeout -> {
-                // No bank SMS by the deadline means there is no confirmed
-                // payment to report: the row is discarded and nothing is
-                // shown. Just wind the overlay down.
-                finishWithResult { }
-            }
-            else -> Unit
         }
     }
 
@@ -371,8 +331,9 @@ class CallOverlayService : Service() {
         val bar = view.findViewById<android.widget.ProgressBar>(R.id.progressBar) ?: return
         val percent = view.findViewById<TextView>(R.id.progressPercent)
 
-        // Begin after the milestone animation to PROGRESS_IN_CALL_START lands,
-        // so the creep starts from a settled value instead of fighting it.
+        // Begin after the milestone animation to the answered-call start
+        // fraction (see OverlayPresenter) lands, so the creep starts from a
+        // settled value instead of fighting it.
         val creep = Runnable {
             progressAnimator = android.animation.ObjectAnimator.ofInt(
                 bar,
@@ -437,24 +398,13 @@ class CallOverlayService : Service() {
     }
 
     /**
-     * Check if overlay permission is granted
-     */
-    private fun checkOverlayPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(this)
-        } else {
-            true // Pre-Marshmallow doesn't need this permission
-        }
-    }
-
-    /**
      * Show error toast when overlay permission is not granted
      */
     private fun showPermissionErrorToast() {
         Handler(Looper.getMainLooper()).post {
             Toast.makeText(
                 this,
-                "Overlay permission required for call protection. Please grant permission in Settings.",
+                R.string.error_overlay_permission_required,
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -489,7 +439,7 @@ class CallOverlayService : Service() {
         Handler(Looper.getMainLooper()).post {
             Toast.makeText(
                 this,
-                "Failed to show call protection overlay. Please try again.",
+                R.string.error_overlay_show_failed,
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -606,10 +556,10 @@ class CallOverlayService : Service() {
      * Handle call detection - show overlay when call is actually dialed
      */
     fun onCallDetected() {
-        OverlayLogger.logCallDetection(
-            pendingPhoneNumber,
-            "CALL_DETECTED",
-            "isCallDetected: $isCallDetected, isOverlayActive: $isOverlayActive"
+        Log.d(
+            TAG,
+            "CALL_DETECTION: CALL_DETECTED | Phone: $pendingPhoneNumber | " +
+                "isCallDetected: $isCallDetected, isOverlayActive: $isOverlayActive"
         )
 
         Log.d(TAG, "=== onCallDetected() called ===")
@@ -664,14 +614,14 @@ class CallOverlayService : Service() {
         Log.d(TAG, "=== createSystemOverlay() called ===")
 
         // Check overlay permission before creating overlay
-        if (!checkOverlayPermission()) {
-            OverlayLogger.logPermissionEvent("SYSTEM_ALERT_WINDOW", false, "overlay_creation")
+        if (!PermissionManager.canDrawOverlays(this)) {
+            Log.d(TAG, "PERMISSION: SYSTEM_ALERT_WINDOW = DENIED | Context: overlay_creation")
             Log.e(TAG, "Overlay permission not granted - cannot show overlay")
             showPermissionErrorToast()
             return
         }
 
-        OverlayLogger.logPermissionEvent("SYSTEM_ALERT_WINDOW", true, "overlay_creation")
+        Log.d(TAG, "PERMISSION: SYSTEM_ALERT_WINDOW = GRANTED | Context: overlay_creation")
 
         try {
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -750,15 +700,11 @@ class CallOverlayService : Service() {
                 isOverlayActive = true
                 isOverlayShowing = true
 
-                OverlayLogger.logOverlayState(
-                    "CREATED",
-                    true,
-                    details = mapOf(
-                        "phoneNumber" to phoneNumber,
-                        "amount" to amount,
-                        "isOverlayActive" to isOverlayActive,
-                        "isOverlayShowing" to isOverlayShowing
-                    )
+                Log.d(
+                    TAG,
+                    "OVERLAY_CREATED: SUCCESS | Details: " +
+                        "{phoneNumber=$phoneNumber, amount=$amount, " +
+                        "isOverlayActive=$isOverlayActive, isOverlayShowing=$isOverlayShowing}"
                 )
 
                 Log.d(TAG, "System overlay created and shown successfully")
@@ -793,12 +739,13 @@ class CallOverlayService : Service() {
                 // Overlay content reflects the real payment session state
                 // (no fake timed progress, no separate call monitor — both
                 // are driven by the collectors wired up in onCreate()).
-                // Kept below PROGRESS_IN_CALL_START so the bar only ever moves
-                // forward: dial 10% → call answered 20% → creep to 90% over
+                // Kept below the answered-call start fraction (see
+                // OverlayPresenter) so the bar only ever moves forward:
+                // dial 10% → call answered 20% → creep to 90% over
                 // PROGRESS_IN_CALL_CREEP_MS → 100% only when the request is
                 // genuinely sent.
                 updateOverlayStatus(
-                    status = "Processing Payment",
+                    status = getString(R.string.overlay_processing_payment),
                     step = getString(R.string.overlay_connecting),
                     progressFraction = PROGRESS_CONNECTING
                 )
@@ -909,7 +856,7 @@ class CallOverlayService : Service() {
                 Log.w(TAG, "Failed to terminate call programmatically")
                 Toast.makeText(
                     this,
-                    "Unable to end the call automatically. Please hang up manually.",
+                    R.string.error_end_call_failed,
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -917,7 +864,7 @@ class CallOverlayService : Service() {
             // If no session was active (defensive), still wind down cleanly.
             if (sessionManager == null) {
                 hideOverlayInternal()
-                dialogManager?.showTransactionCancelledByUser()
+                dialogManager?.show(TerminalDialog.CancelledByUser)
                 Handler(Looper.getMainLooper()).postDelayed({ stopSelf() }, 1000)
             }
         } catch (e: Exception) {

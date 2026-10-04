@@ -66,11 +66,6 @@ class PermissionManager(private val activity: Activity) {
     }
 
     /**
-     * Alias for readability in some call sites
-     */
-    fun hasOverlayPermission(): Boolean = checkOverlayPermission()
-
-    /**
      * The system "draw over other apps" settings intent, or null if the
      * permission is already granted (or unnecessary below API M). Callers
      * launch it via their own ActivityResultLauncher — a launcher must be
@@ -100,14 +95,6 @@ class PermissionManager(private val activity: Activity) {
         return PermissionConstants.REQUIRED_PERMISSIONS.filter { permission ->
             ContextCompat.checkSelfPermission(activity, permission) != PackageManager.PERMISSION_GRANTED
         }
-    }
-
-    /**
-     * Checks if overlay permission is available for services
-     * This replaces inline checks in USSDOverlayService and UssdSetupOverlayService
-     */
-    fun canDrawOverlays(): Boolean {
-        return canDrawOverlays(activity)
     }
 
     /**

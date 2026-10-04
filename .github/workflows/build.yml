@@ -86,6 +86,7 @@ jobs:
           # HardcodedText lint only covers XML; this covers Kotlin. All
           # user-visible copy lives in strings.xml (stringResource/getString),
           # which keeps wording reviewable in one place and translation-ready.
+          # The @StringRes parameter seam is the primary enforcement; these greps are the backstop.
           # Ratchet for the common single-line `Text("literal")` form; the
           # leading [^A-Za-z0-9_] avoids matching e.g. ClipData.newPlainText(.
           ! grep -rnE '(^|[^A-Za-z0-9_])Text\(\s*(text\s*=\s*)?"[^"]' \

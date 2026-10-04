@@ -43,7 +43,10 @@ data class Transaction(
     val verifiedAt: Long? = null
 ) {
     /**
-     * Convert to PaymentDetails for UI compatibility
+     * Convert to PaymentDetails for the home screen's recent-payments row.
+     * The status passes through as the canonical [TransactionStatus] word
+     * the row was written with — every status-word mapping for renderers
+     * lives in the ui/status PaymentStatus module (ADR-0001).
      */
     fun toPaymentDetails(): PaymentDetails {
         return PaymentDetails(
@@ -52,15 +55,7 @@ data class Transaction(
             phoneNumber = phoneNumber ?: "",
             amount = amount.toDoubleOrNull() ?: 0.0,
             timestamp = timestamp,
-            status = when (status.uppercase()) {
-                "SUCCESS", "SUCCESSFUL", "COMPLETED" -> PaymentStatus.COMPLETED
-                "UNVERIFIED" -> PaymentStatus.UNVERIFIED
-                "NEEDS_REVIEW" -> PaymentStatus.NEEDS_REVIEW
-                "PENDING" -> PaymentStatus.PENDING
-                "CANCELLED" -> PaymentStatus.CANCELLED
-                "FAILED", "DECLINED" -> PaymentStatus.FAILED
-                else -> PaymentStatus.PENDING
-            }
+            status = status.uppercase()
         )
     }
 

@@ -360,7 +360,7 @@ class QRScannerActivity : ComponentActivity() {
             Log.w("QRScanner", "Camera permission denied")
             Toast.makeText(
                 this,
-                "Camera permission is required for QR scanning",
+                R.string.error_camera_permission_required,
                 Toast.LENGTH_LONG
             ).show()
             setResult(RESULT_ERROR)
@@ -512,7 +512,7 @@ class QRScannerActivity : ComponentActivity() {
             if (!beginQrPaymentSession(upiData)) return
 
             // Show black screen with status
-            showBlackScreenWithStatus("Processing payment...")
+            showBlackScreenWithStatus(R.string.qr_status_processing)
 
             // 1. Copy VPA to clipboard so the user can paste it into the USSD
             //    menu. It is a payee identifier (PII), so it is flagged
@@ -813,11 +813,15 @@ class QRScannerActivity : ComponentActivity() {
     }
 
     /**
-     * Show black screen with status message
+     * Show black screen with status message. Takes a string resource, never
+     * a [String], for the same reason as [updateBlackScreenStatus]: this is
+     * user-visible payment copy behind a multi-line call site that the copy
+     * gates' line-oriented greps cannot see.
      */
-    private fun showBlackScreenWithStatus(message: String) {
+    private fun showBlackScreenWithStatus(@StringRes messageRes: Int) {
         runOnUiThread {
             if (!isActivityAlive()) return@runOnUiThread
+            val message = getString(messageRes)
             Log.d("QRScanner", "Showing black screen with status: $message")
 
             // Hide camera and scanner elements
