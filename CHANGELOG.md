@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.0.1 - 2026-10-03
+
+The first signed APK offered through GitHub Releases. The maintainer completed
+the physical-device checklist on this exact APK before it was promoted to a
+stable release. Its signing certificate matches the fingerprint in
+`SECURITY.md`.
+
 ### Security
 - **CI no longer publishes a debug APK.** On a now-public repository, that
   artifact was world-downloadable, `debuggable=true`, signed with the public
