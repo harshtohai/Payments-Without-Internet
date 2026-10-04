@@ -33,20 +33,7 @@ class SimpleSMSReceiver : BroadcastReceiver() {
 
         Log.d(TAG, "SMS received")
 
-        val detector = TransactionDetector.getInstance(context)
-        if (!detector.shouldProcessSMS()) {
-            Log.d(TAG, "No active payment operation, ignoring SMS")
-            return
-        }
-
-        // Claim this exact message so a redelivered SMS_RECEIVED broadcast
-        // can't process the same SMS a second time.
-        if (!detector.tryClaimSms(body)) {
-            Log.d(TAG, "SMS already claimed")
-            return
-        }
-
-        // Keep the process alive until parsing + persistence complete —
+        // Keep the process alive until claiming + persistence complete —
         // a fire-and-forget coroutine from onReceive() can be killed
         // mid-write once onReceive() returns.
         val pendingResult = goAsync()
@@ -56,7 +43,15 @@ class SimpleSMSReceiver : BroadcastReceiver() {
                 // receiver anyway; bound our own work below that so
                 // pendingResult.finish() always runs on our terms.
                 val completed = withTimeoutOrNull(8_000) {
-                    SmsIngestionPipeline.ingest(context, detector, sender, body)
+                    // Window check, dedup claim, and parse in one atomic
+                    // step: null means this SMS decides nothing about any
+                    // payment.
+                    val claimed = TransactionDetector.getInstance(context).claim(sender, body)
+                    if (claimed == null) {
+                        Log.d(TAG, "SMS not claimed - ignoring")
+                    } else {
+                        SmsIngestionPipeline.ingest(context, claimed)
+                    }
                 }
                 if (completed == null) {
                     Log.w(TAG, "SMS processing timed out before completion")

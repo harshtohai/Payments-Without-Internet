@@ -8,7 +8,7 @@ import android.content.Intent
 import android.util.Log
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.flowpay.app.FlowpayApplication
-import com.flowpay.app.helpers.TransactionDetector
+import com.flowpay.app.helpers.ClaimedSms
 import com.flowpay.app.payment.sms.SimpleTransaction
 import com.flowpay.app.repository.TransactionRepository
 import com.flowpay.app.ui.activities.PaymentResultActivity
@@ -20,37 +20,48 @@ import kotlinx.coroutines.withContext
  * point: [SimpleSMSReceiver] (the real broadcast receiver) and, in debug
  * builds only, `DebugSmsInjectionReceiver`. Keeping this in one place means
  * the debug injection tool exercises exactly the same code a real bank SMS
- * would go through — parsing, session confirmation, persistence, and the
- * result-screen launch — not a parallel reimplementation of it.
+ * would go through — not a parallel reimplementation of it.
+ *
+ * Ingestion starts where [TransactionDetector.claim]
+ * [com.flowpay.app.helpers.TransactionDetector.claim] ends: the SMS has
+ * already passed the operation window, the cross-pipeline dedup, and the
+ * parser (all inside that one atomic call), and a consuming match has
+ * already closed the window. Both entry points run the same
+ * claim -> ingest sequence, so what the debug tool tests is the
+ * production path end to end.
  */
 object SmsIngestionPipeline {
 
     private const val TAG = "SmsIngestionPipeline"
 
-    suspend fun ingest(context: Context, detector: TransactionDetector, sender: String, body: String) {
-        // Captured BEFORE processSMS: a consuming match clears the operation
-        // window (including this id).
-        val windowTxnId = detector.getSessionTxnId()
+    /**
+     * Turns one already-claimed SMS ([ClaimedSms], from
+     * TransactionDetector.claim) into a recorded, surfaced payment
+     * outcome. This decides which row owns the confirmation — a live
+     * session's row, or the orphaned PENDING row named by the session
+     * txn id captured at claim time before the window was consumed —
+     * persists it when nothing does, then broadcasts, notifies, and
+     * launches the result screen.
+     */
+    suspend fun ingest(context: Context, claimed: ClaimedSms) {
+        val transaction = claimed.transaction
 
-        val transaction = detector.processSMS(sender, body)
-        if (transaction == null) {
-            Log.d(TAG, "Not a transaction SMS")
-            return
-        }
-
-        // An active payment session owns its row — update it in place. With
-        // no live session (QR flow, or the process died mid-payment), try to
-        // reattach the confirmation to the still-PENDING row recorded at
-        // begin(); only insert a fresh row when neither applies. Without the
-        // reattach, a payment whose process died would end up as TWO rows:
-        // a fresh SUCCESS plus the original row. A confirmation arriving
-        // after the deadline discarded that row finds nothing to adopt and
-        // is saved standalone — the payment still surfaces.
+        // An active payment session owns its row — update it in place
+        // (onSmsConfirmed). With no live session (QR flow, or the process
+        // died mid-payment), try to reattach the confirmation to the
+        // still-PENDING row recorded at begin(), via the session txn id
+        // captured at claim time BEFORE a consuming match cleared the
+        // window; only insert a fresh row when neither applies. Without the
+        // reattach, a
+        // payment whose process died would end up as TWO rows: a fresh
+        // SUCCESS plus the original row. A confirmation arriving after the
+        // deadline discarded that row finds nothing to adopt and is saved
+        // standalone — the payment still surfaces.
         val sessionManager = FlowpayApplication.from(context)?.paymentSessionManager
         val sessionTxnId = sessionManager?.onSmsConfirmed(transaction)
         val recordTxnId = resolveOwnerTxnId(
             sessionTxnId = sessionTxnId,
-            windowTxnId = windowTxnId,
+            windowTxnId = claimed.sessionTxnId,
             parsed = transaction
         ) { orphanId -> adoptOrphanedRow(context, orphanId, transaction) }
 
@@ -60,7 +71,7 @@ object SmsIngestionPipeline {
         // DEBIT. Surfacing it would flash a false "Payment successful" result
         // screen for the credit's amount, post a success notification, and save
         // a phantom row, all while the real payment is still pending. Ignore it;
-        // processSMS deliberately left the window open for the genuine debit.
+        // claim deliberately left the window open for the genuine debit.
         if (isUnrelatedIncomingCredit(recordTxnId, transaction)) {
             Log.d(TAG, "Unrelated incoming credit during payment window - ignored")
             return

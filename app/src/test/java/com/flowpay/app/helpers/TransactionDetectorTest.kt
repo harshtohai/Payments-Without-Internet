@@ -20,11 +20,13 @@ import org.robolectric.annotation.Config
 
 /**
  * The stateful half of SMS confirmation: the SharedPreferences-backed
- * operation window and the cross-pipeline dedup. Every case here guards a
- * money outcome — a window that closes too early drops a genuine bank
- * confirmation (false UNVERIFIED), a dedup that never collides records the
- * same payment twice, and a stray credit that consumes the window leaves
- * the real debit confirmation unmatchable.
+ * operation window and the cross-pipeline dedup, exercised end-to-end
+ * through the one atomic [TransactionDetector.claim] entry point every
+ * ingestion pipeline calls. Every case here guards a money outcome — a
+ * window that closes too early drops a genuine bank confirmation (false
+ * UNVERIFIED), a dedup that never collides records the same payment
+ * twice, and a stray credit that consumes the window leaves the real
+ * debit confirmation unmatchable.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -37,6 +39,14 @@ class TransactionDetectorTest {
     // persisted window (e.g. back-date start_time) like a reboot/GC would.
     private val prefs
         get() = context.getSharedPreferences("payment_operation", Context.MODE_PRIVATE)
+
+    // Confirmation bodies for the Rs.500 payment every test arms. Distinct
+    // ref numbers across the fixtures keep one claim from tripping the
+    // dedup of a neighbouring assertion in the same test.
+    private val debitBody = "Rs 500 sent to JOHN via UPI Ref 123456789012 -HDFC Bank"
+    private val otherDebitBody = "Rs 500 sent to JOHN via UPI Ref 998877665544 -HDFC Bank"
+    private val creditBody = "Rs 500 credited from JOHN via UPI ref 123456789012 -HDFC Bank"
+    private val otherCreditBody = "Rs 500 credited from JOHN via UPI ref 998877665544 -HDFC Bank"
 
     @Before
     fun freshDetector() {
@@ -55,20 +65,28 @@ class TransactionDetectorTest {
     }
 
     @Test
-    fun `no active operation rejects SMS processing`() {
+    fun `claim rejects a bank SMS when no payment operation is active`() {
         // Outside a payment, bank SMS must be ignored entirely: processing
         // an unrelated debit here would fabricate a Flowpay transaction.
-        assertFalse(detector.shouldProcessSMS())
+        // The body is one that parses when a window IS armed (see the
+        // consuming-match tests below), so this null is the window's.
+        assertNull(detector.claim("VK-HDFCBK", debitBody))
     }
 
     @Test
     fun `startOperation opens the window and stopOperation closes it`() {
         detector.startOperation("SEND_MONEY", expectedAmount = "500")
-        assertTrue("SMS during an in-flight payment must be eligible", detector.shouldProcessSMS())
         assertEquals("SEND_MONEY", detector.getOperationType())
+        assertNotNull(
+            "a window armed by startOperation must accept its confirmation",
+            detector.claim("VK-HDFCBK", debitBody)
+        )
 
+        // The debit claim above consumed the window (that is its job), so
+        // re-arm to show stopOperation closing a live one.
+        detector.startOperation("SEND_MONEY", expectedAmount = "500")
         detector.stopOperation()
-        assertFalse("closed window must reject SMS", detector.shouldProcessSMS())
+        assertNull("closed window must reject SMS", detector.claim("VK-HDFCBK", otherDebitBody))
         assertNull(detector.getOperationType())
     }
 
@@ -82,7 +100,7 @@ class TransactionDetectorTest {
             .putLong("start_time", System.currentTimeMillis() - TransactionDetector.OPERATION_WINDOW_MILLIS - 1)
             .commit()
 
-        assertFalse("SMS after the window must be rejected", detector.shouldProcessSMS())
+        assertNull("SMS after the window must be rejected", detector.claim("VK-HDFCBK", debitBody))
         // The expired operation must also be cleaned up, not left half-open.
         assertFalse("expiry must clear the persisted operation", prefs.getBoolean("is_active", false))
         assertNull(detector.getOperationType())
@@ -110,19 +128,41 @@ class TransactionDetectorTest {
             .putLong("start_time", System.currentTimeMillis() - 6 * 60 * 1000L)
             .commit()
 
-        assertTrue(detector.shouldProcessSMS())
+        val claimed = detector.claim("VK-HDFCBK", debitBody)
+        assertNotNull("a slow-but-genuine confirmation must still land", claimed)
     }
 
     @Test
-    fun `sessionTxnId survives until stopOperation clears it`() {
+    fun `window missing an operation type is rejected and cleaned up`() {
+        // A half-written window (process death mid-startOperation, or
+        // tampered prefs) must not let SMS through on is_active alone.
+        detector.startOperation("SEND_MONEY", expectedAmount = "500")
+        prefs.edit()
+            .remove("operation_type")
+            .commit()
+
+        assertNull(detector.claim("VK-HDFCBK", debitBody))
+        assertFalse("a typeless window must be cleared", prefs.getBoolean("is_active", false))
+    }
+
+    @Test
+    fun `claim returns the session txn id recorded at startOperation`() {
         // The persisted session id is what lets a confirmation that arrives
         // AFTER process death reattach to its PENDING row instead of
-        // inserting a duplicate transaction.
+        // inserting a duplicate transaction. It must ride along with the
+        // claim even though the same call clears the window.
         detector.startOperation("SEND_MONEY", expectedAmount = "500", sessionTxnId = "abc")
-        assertEquals("abc", detector.getSessionTxnId())
 
-        detector.stopOperation()
-        assertNull("a cleared window must not leak the old session id", detector.getSessionTxnId())
+        val claimed = detector.claim("VK-HDFCBK", debitBody)
+        assertNotNull(claimed)
+        assertEquals("abc", claimed!!.sessionTxnId)
+
+        // The consumed window must not leak the old id into the next
+        // operation armed without one.
+        detector.startOperation("SEND_MONEY", expectedAmount = "500")
+        val fresh = detector.claim("VK-HDFCBK", otherDebitBody)
+        assertNotNull(fresh)
+        assertNull("cleared window must not leak the old session id", fresh!!.sessionTxnId)
     }
 
     @Test
@@ -132,17 +172,21 @@ class TransactionDetectorTest {
         // same message can never be claimed twice. A sender-qualified key
         // would let cosmetic sender differences slip past the dedup and
         // silently double-record a payment — this is the regression test.
-        val body = "Rs 4,999.00 debited from A/c XX9012 for UPI txn 425512345678 -ICICI Bank"
+        //
+        // Credits are the probe: a credit claims successfully but leaves
+        // the window open, so a second null can only come from the dedup —
+        // not from a consumed window.
+        detector.startOperation("SEND_MONEY", expectedAmount = "500")
 
-        assertTrue("first claim on this body succeeds", detector.tryClaimSms(body))
-        assertFalse("a repeat claim on the same body must lose", detector.tryClaimSms(body))
-        assertFalse(
+        assertNotNull("first claim on this body succeeds", detector.claim("VM-HDFCBK", creditBody))
+        assertNull("a repeat claim on the same body must lose", detector.claim("VM-HDFCBK", creditBody))
+        assertNull(
             "whitespace differences in a redelivery must still dedupe",
-            detector.tryClaimSms("  " + body.replace(" ", "  "))
+            detector.claim("VM-HDFCBK", "  " + creditBody.replace(" ", "  "))
         )
-        assertTrue(
+        assertNotNull(
             "a different SMS must not be blocked by earlier claims",
-            detector.tryClaimSms("Rs 120.00 debited from A/c XX9012 for UPI txn 990011223344 -ICICI Bank")
+            detector.claim("VM-HDFCBK", otherCreditBody)
         )
     }
 
@@ -150,17 +194,16 @@ class TransactionDetectorTest {
     fun `debit confirmation consumes the operation window`() {
         detector.startOperation("SEND_MONEY", expectedAmount = "500")
 
-        val body = "Rs 500 sent to JOHN via UPI Ref 123456789012 -HDFC Bank"
-        val txn = detector.processSMS("VK-HDFCBK", body)
+        val claimed = detector.claim("VK-HDFCBK", debitBody)
 
-        assertNotNull("matching debit confirmation must parse", txn)
-        assertEquals("DEBIT", txn!!.transactionType)
-        assertEquals(TransactionStatus.SUCCESS, txn.status)
+        assertNotNull("matching debit confirmation must claim", claimed)
+        assertEquals("DEBIT", claimed!!.transaction.transactionType)
+        assertEquals(TransactionStatus.SUCCESS, claimed.transaction.status)
 
         // The window is one-shot for debits: a second bank SMS must not be
         // able to confirm the same payment twice.
-        assertNull("consumed window must not process again", detector.processSMS("VK-HDFCBK", body))
-        assertFalse(detector.shouldProcessSMS())
+        assertNull("consumed window must not claim again", detector.claim("VK-HDFCBK", otherDebitBody))
+        assertNull(detector.getOperationType())
     }
 
     @Test
@@ -171,21 +214,15 @@ class TransactionDetectorTest {
         // moment later is dropped and the payment is left unverified.
         detector.startOperation("SEND_MONEY", expectedAmount = "500")
 
-        val credit = detector.processSMS(
-            "VM-HDFCBK",
-            "Rs 500 credited from JOHN via UPI ref 123456789012 -HDFC Bank"
-        )
+        val credit = detector.claim("VM-HDFCBK", creditBody)
         assertNotNull(credit)
-        assertEquals("CREDIT", credit!!.transactionType)
-        assertTrue("window must stay open after a credit", detector.shouldProcessSMS())
+        assertEquals("CREDIT", credit!!.transaction.transactionType)
 
-        val debit = detector.processSMS(
-            "VK-HDFCBK",
-            "Rs 500 sent to JOHN via UPI Ref 998877665544 -HDFC Bank"
-        )
-        assertNotNull("the awaited debit must still be processable", debit)
-        assertEquals("DEBIT", debit!!.transactionType)
-        assertFalse("the debit, not the credit, consumes the window", detector.shouldProcessSMS())
+        val debit = detector.claim("VK-HDFCBK", otherDebitBody)
+        assertNotNull("the awaited debit must still be claimable", debit)
+        assertEquals("DEBIT", debit!!.transaction.transactionType)
+
+        assertNull("the debit, not the credit, consumes the window", detector.getOperationType())
     }
 
     @Test
@@ -198,19 +235,35 @@ class TransactionDetectorTest {
         // mis-recorded (as FAILED-with-retry, the money-loss bug).
         detector.startOperation("SEND_MONEY", expectedAmount = "500")
 
-        val interfering = detector.processSMS(
+        val interfering = detector.claim(
             "VK-HDFCBK",
             "Your HDFC Bank card txn of Rs.200.00 at AMAZON was declined due to insufficient balance. Ref 700000000001"
         )
         assertNull("a mismatched-amount alert is not our confirmation", interfering)
-        assertTrue("the window must stay open for the real confirmation", detector.shouldProcessSMS())
 
-        val real = detector.processSMS(
-            "VK-HDFCBK",
-            "Rs 500 sent to JOHN via UPI Ref 998877665544 -HDFC Bank"
-        )
+        val real = detector.claim("VK-HDFCBK", debitBody)
         assertNotNull("the genuine confirmation must still land", real)
-        assertEquals(TransactionStatus.SUCCESS, real!!.status)
-        assertFalse("the real confirmation consumes the window", detector.shouldProcessSMS())
+        assertEquals(TransactionStatus.SUCCESS, real!!.transaction.status)
+
+        assertNull("the real confirmation consumes the window", detector.getOperationType())
+    }
+
+    @Test
+    fun `claim returns null for a body the parser does not match`() {
+        // The window is armed; only the parser can reject this message (a
+        // bank sender, but no transaction indicators and no amount).
+        detector.startOperation("SEND_MONEY", expectedAmount = "500")
+
+        assertNull(
+            "a non-transaction bank message must never be claimed",
+            detector.claim("VK-HDFCBK", "Dear customer, your KYC update is due")
+        )
+
+        // A parse failure must not consume the window: the real
+        // confirmation arriving next still claims.
+        assertNotNull(
+            "the window must survive a non-matching message",
+            detector.claim("VK-HDFCBK", debitBody)
+        )
     }
 }

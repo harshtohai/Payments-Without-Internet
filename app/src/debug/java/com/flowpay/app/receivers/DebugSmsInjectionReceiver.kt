@@ -11,6 +11,7 @@ import com.flowpay.app.helpers.TransactionDetector
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Debug-only tool: replays a bank SMS through the exact same live pipeline
@@ -88,21 +89,30 @@ class DebugSmsInjectionReceiver : BroadcastReceiver() {
             return
         }
 
-        val detector = TransactionDetector.getInstance(context)
-        if (!detector.shouldProcessSMS()) {
-            Log.w(TAG, "No active payment operation — send START_OPERATION first")
-            return
-        }
-        if (!detector.tryClaimSms(body)) {
-            Log.w(TAG, "SMS already claimed (duplicate injection?)")
-            return
-        }
-
+        // Same shape as SimpleSMSReceiver: goAsync keeps the process alive
+        // for the coroutine, and the 8s cap stays under goAsync's ~10s
+        // budget so pendingResult.finish() always runs on our terms.
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 Log.i(TAG, "Injecting debug SMS from $sender")
-                SmsIngestionPipeline.ingest(context, detector, sender, body)
+                val completed = withTimeoutOrNull(8_000) {
+                    // Window check, dedup claim, and parse in one atomic
+                    // step — identical to what a real SMS_RECEIVED broadcast
+                    // goes through.
+                    val claimed = TransactionDetector.getInstance(context).claim(sender, body)
+                    if (claimed == null) {
+                        // claim() logs the exact rejecting guard; the usual
+                        // debug-tool cause is that no START_OPERATION was
+                        // sent first.
+                        Log.w(TAG, "SMS not claimed - no active operation? send START_OPERATION first")
+                    } else {
+                        SmsIngestionPipeline.ingest(context, claimed)
+                    }
+                }
+                if (completed == null) {
+                    Log.w(TAG, "Debug SMS injection timed out before completion")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Debug SMS injection failed", e)
             } finally {
