@@ -43,8 +43,8 @@ the container references them rather than duplicating their lifecycle.
 ## Payment lifecycle state machine
 
 [`PaymentSessionManager`](../app/src/main/java/com/flowpay/app/payment/PaymentSessionManager.kt)
-is the single writer of payment state and the most carefully-built part of
-the app. It takes its dependencies as interfaces (`PaymentTransactionStore`,
+is the single writer of payment state and the most carefully-built part of the
+app. It takes its dependencies as interfaces (`PaymentTransactionStore`,
 `CallStateSource`) plus an injectable clock, which is what makes it fully
 unit-testable without a device (see
 [`PaymentSessionManagerTest`](../app/src/test/java/com/flowpay/app/payment/PaymentSessionManagerTest.kt)).
@@ -67,11 +67,11 @@ Initiating ──OFFHOOK──▶ InProgress ──call ends──▶ WaitingFor
         later debit can't be adopted         └── failure keyword ⇒ Failed       │
         onto the cancelled row)                                                 │
    no SMS before the 10-minute deadline ⇒ Timeout, and the PENDING row is DELETED
-                                             │
-                    Nothing is surfaced: a payment the bank never confirmed
-                    leaves no record. The SMS window outlives the deadline by
-                    30s, so a late-but-genuine confirmation still lands — with
-                    no row to adopt it is saved as a standalone transaction.
+                                              │
+                     Nothing is surfaced: a payment the bank never confirmed
+                     leaves no record. The SMS window outlives the deadline by
+                     30s, so a late-but-genuine confirmation still lands — with
+                     no row to adopt it is saved as a standalone transaction.
 ```
 
 Every terminal transition `join()`s the pending-insert coroutine first, so
@@ -85,51 +85,61 @@ PENDING rows in SQL, so a confirmation can never rewrite a row the user
 already cancelled. The QR flow runs through the same session lifecycle — it
 used to bypass it entirely. The `PaymentState` sealed hierarchy carries
 exactly the states the machine emits — dead QR/retry variants were removed so
-the type reflects reality.
+the type reflects reality. Every non-idle state implements
+`PaymentState.SessionData` (`transactionId`, `phoneNumber`, `amount`), so
+those facts have one home instead of three 12-arm `when` tables.
 
-## SMS ingestion — two pipelines, one parser
+## SMS ingestion — one claim, one pipeline
 
 The confirmation SMS is money-outcome truth, so its handling is the second
 most careful area.
 
 ```
-                 ┌─────────────────────────────┐
+                  ┌─────────────────────────────┐
   bank SMS ─────▶│ SimpleSMSReceiver           │  priority-999 broadcast
-                 │ (RECEIVE_SMS)               │  receiver; goAsync + 8s cap
-                 └──────────────┬──────────────┘
-                                │
-                 shouldProcessSMS() + tryClaimSms()
-                                │
-                                ▼
-                        SmsTransactionParser.parse()   ← PURE, Context-free, tested
-                                            │
-                                SmsIngestionPipeline.ingest()
-                                            │
-                     ┌──────────────────────┴───────────────────────┐
-                     ▼                                               ▼
-          active session? update its row              no session (QR/legacy)?
-          via PaymentSessionManager.onSmsConfirmed     insert a fresh row
-                     └──────────────────┬──────────────────────────┘
-                                        ▼
-                            launch PaymentResultActivity
+                  │ (RECEIVE_SMS)               │  receiver; goAsync + 8s cap
+                  └──────────────┬──────────────┘
+                                 │
+                 TransactionDetector.claim()  ← ONE atomic @Synchronized step:
+                                 │               window check + dedup claim +
+                                 │               txn-id capture + parse +
+                                 ▼               consumption — null = decides nothing
+                     SmsIngestionPipeline.ingest(claim)
+                                 │
+                      ┌──────────┴───────────────────────┐
+                      ▼                                   ▼
+        active session? update its row        no session (QR/legacy)?
+        via PaymentSessionManager             reattach to the PENDING row the
+        .onSmsConfirmed                       claim's txnId names, else insert
+                      └──────────┬────────────  a fresh row
+                                 ▼
+                     launch PaymentResultActivity
 ```
 
 - [`SmsTransactionParser`](../app/src/main/java/com/flowpay/app/payment/sms/SmsTransactionParser.kt)
   holds all the bank-SMS matching logic — pure, Context-free, and tested
   against a per-bank corpus. [`TransactionDetector`](../app/src/main/java/com/flowpay/app/helpers/TransactionDetector.kt)
   is the stateful shell around it: the SharedPreferences-backed *operation
-  window* (only SMS arriving while a payment is in flight are eligible;
-  sized to the verification deadline plus a grace margin, so a slow bank SMS
-  is never dropped here while the session still awaits it) and the dedup
-  that stops a redelivered SMS broadcast from double-processing one message.
-- **Dedup** is `tryClaimSms` (a body-only normalized-key claim) plus
-  `@Synchronized processSMS` re-checking the operation window under lock.
+  window* (only SMS arriving while a payment is in flight are eligible; sized
+  to the verification deadline plus a grace margin, so a slow bank SMS is
+  never dropped here while the session still awaits it) and the dedup that
+  stops a redelivered SMS broadcast from double-processing one message.
+- **`claim()` is the single, atomic entry point.** The window check, the dedup
+  claim, the session-txn-id capture, the parse, and the window consumption
+  all run inside one `@Synchronized` call, returning a `ClaimedSms` (the
+  parsed transaction plus the session txn id, captured BEFORE a consuming
+  match clears the window that holds it) or null. The old multi-step protocol
+  — whose ordering constraint was enforced only by a KDoc comment callers
+  had to remember — is gone: callers can neither observe nor get wrong an
+  in-between state. The stray-CREDIT exception (a credit never consumes the
+  window the real debit confirmation still needs) lives inside `claim()` too.
 - [`SmsIngestionPipeline`](../app/src/main/java/com/flowpay/app/receivers/SmsIngestionPipeline.kt)
-  is the single path from a claimed SMS to an outcome — parsing, session
-  confirmation or orphaned-row reattach, persistence, broadcasts, the result
-  notification, and the result-screen launch. The debug SMS-injection tool
-  drives the same pipeline, so tests exercise the exact production path (see
-  [TESTING.md](TESTING.md)).
+  is the single path from a claimed SMS to an outcome — session confirmation
+  or orphaned-row reattach (the row the claim's txn id names), persistence,
+  broadcasts, the result notification, and the result-screen launch. Parsing
+  happens upstream, inside `claim()`. The debug SMS-injection tool drives the
+  same claim → ingest sequence, so tests exercise the exact production path
+  (see [TESTING.md](TESTING.md)).
 - There used to be a second ingestion path, a `NotificationListenerService`
   fallback for when `RECEIVE_SMS` was denied. It was removed: the setting
   that would have enabled it was never wired to anything in the UI, so it
@@ -148,9 +158,19 @@ validated by the pure, tested
 and manages call audio.
 [`CallOverlayService`](../app/src/main/java/com/flowpay/app/services/CallOverlayService.kt)
 draws a `TYPE_APPLICATION_OVERLAY` window during the call so the user has a UI
-anchor, and mirrors `PaymentState` into result dialogs. Its overlay watchdog
-and the user "End call" path notify the session **before** any best-effort
-UI/audio cleanup, and can't be skipped by an exception in that cleanup.
+anchor — and decides nothing about what that anchor shows: every
+PaymentState → what-to-show decision (which result dialog, what progress, how
+to wind down, whether to hang up) is made by
+[`OverlayPresenter`](../app/src/main/java/com/flowpay/app/services/OverlayPresenter.kt),
+a pure, unit-tested mapper over an exhaustive `when` — a future `PaymentState`
+variant will not compile until the mapping decides what it means. The service
+keeps only the effects: window management, the watchdog, the documented
+start choreography, audio, and the actual view/dialog calls. Its overlay
+watchdog and the user "End call" path notify the session **before** any
+best-effort UI/audio cleanup, and can't be skipped by an exception in that
+cleanup. Overlay permission is answered by
+[`PermissionManager`](../app/src/main/java/com/flowpay/app/managers/PermissionManager.kt)
+— the one interface for that check, including from a Service context.
 
 ## UI
 
@@ -161,11 +181,13 @@ carried by a shared ViewModel
 ([`MainViewModel`](../app/src/main/java/com/flowpay/app/viewmodel/MainViewModel.kt))
 rather than static callbacks.
 
-`SetupActivity` and `TestConfigurationActivity` are older and have **no
-ViewModel**: they hold screen state in local `remember { mutableStateOf }` and
-talk to their helpers through a `UICallback` interface. They are listed under
-"Known deliberate simplifications" below — they are first-run screens with no
-state worth surviving process death, and converting them buys little.
+`SetupActivity` and `TestConfigurationActivity` still have **no ViewModel**
+(a deliberate simplification, listed below) — they are first-run screens with
+no state worth surviving process death. But their seams are no longer alike:
+`TestConfigurationHelper` exposes ONE immutable `TestState` through a single
+`StateFlow`, every transition writes its facts exactly once, and the activity
+renders by collecting it — the same pattern the ViewModel screens use, minus
+the ViewModel class. `SetupActivity` keeps the older `UICallback` interface.
 
 All permission and activity results go through `ActivityResultContracts`
 launchers — there are no `onActivityResult` / `onRequestPermissionsResult`
@@ -177,14 +199,22 @@ Two screens stay classic Views by design: `QRScannerActivity` (a CameraX
 lifecycle/saved-state owners — a known bug source, unacceptable in the window
 that supervises a live payment).
 
-Colors and copy each have a single source of truth. Compose colors come from
-the tokens in [`ui/theme/Color.kt`](../app/src/main/java/com/flowpay/app/ui/theme/Color.kt)
-(one named value per visual role; `statusColor(status)` maps a transaction
-status to its color everywhere), layout colors from `colors.xml`, and all
-user-visible strings from `strings.xml`. Two CI gates enforce it: no inline
-`Color(0x…)` outside `ui/theme` (or hex in a layout), and no single-line
-hardcoded `Text("…")` — so a new screen can't quietly reintroduce the drift
-that once spread ~14 near-identical greys across the codebase.
+Colors, copy, and status words each have a single source of truth. Compose
+colors come from the tokens in [`ui/theme/Color.kt`](../app/src/main/java/com/flowpay/app/ui/theme/Color.kt)
+(one named value per visual role), layout colors from `colors.xml`, and all
+user-visible strings from `strings.xml`. The status words are canonical in
+`TransactionStatus` and mapped to label, color, and notification title in
+exactly one place — the [`PaymentStatus`](../app/src/main/java/com/flowpay/app/ui/status/PaymentStatus.kt)
+module (ADR-0001); renderers never re-derive a status word, and an
+unrecognized word reads as UNVERIFIED everywhere. Bank display names likewise
+come from one module, the [`BankDirectory`](../app/src/main/java/com/flowpay/app/data/BankDirectory.kt)
+(ADR-0002). Copy enforcement sits at the parameter seam: `@StringRes`
+parameters on user-visible composable text, compiler-checked, with the
+line-oriented CI greps kept as a backstop — a gate that pattern-matches
+call-site formatting can miss the multi-line and parameter forms this
+codebase once leaked through. A known gap remains: copy returned by
+`SetupHelper`'s validation results is still hardcoded English, deferred to
+its own pass.
 
 ## Persistence
 

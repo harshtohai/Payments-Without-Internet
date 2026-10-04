@@ -44,6 +44,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTP 403 on every PR.
 
 ### Changed
+- One status vocabulary for the whole payment lifecycle. `TransactionStatus`
+  is canonical (ADR-0001); a single module — `ui/status/PaymentStatus` —
+  maps it to every label, color, and notification title. The `PaymentStatus`
+  enum is gone, along with the phantom "SUCCESSFUL"/"COMPLETED"/"DECLINED"
+  arms no producer ever wrote, and an unrecognized status now reads as
+  UNVERIFIED everywhere — junk can no longer render as "Payment Successful"
+  in a notification or anywhere else.
+- An incoming bank SMS is claimed by one atomic call. `TransactionDetector
+  .claim()` runs the window check, the dedup, the session-txn-id capture, the
+  parse, and the window consumption inside a single `@Synchronized` step and
+  hands back a `ClaimedSms` — the ordering rule that used to live only in a
+  KDoc comment can no longer be gotten wrong by any caller.
+- The call overlay decides nothing: `OverlayPresenter`, a pure mapper over an
+  exhaustive `when`, turns each `PaymentState` into what to show, and the
+  service just applies it. The overlay's state routing has its first tests
+  ever, including the watchdog cancel route.
+- The USSD and UPI 123 in-call progress dialogs — ~90% copy-paste of each
+  other — are one `PaymentProgressDialog` parameterised by a `PaymentRail`;
+  UPI 123's green branding survives, but flows through the accent-theme seam
+  instead of seven hardcoded colors.
+- The test-configuration screen's 15-method echo callback is one
+  `StateFlow<TestState>`: each transition writes its facts once, and the
+  13-state flow has its first tests (16 of them, via Robolectric).
+- Bank display names come from one `BankDirectory` (ADR-0002) and a
+  strings.xml section that had sat empty since the tokenization pass — a new
+  bank is no longer three disagreeing copies of the same list.
+- Copy enforcement moved to the parameter seam: `@StringRes` on user-visible
+  composable text, compiler-checked, with the CI greps demoted to a backstop.
+  And `initiateTransfer` — the last stop before dialing — now fails closed
+  without `RECEIVE_SMS`: the UI's pre-flight prompts are affordances, not
+  the enforcement.
 - A transaction's detail view now shows one identifier — the bank
   reference — instead of showing it twice under two different labels
   (`Bank reference` and `Transaction ID` held the same value for every
@@ -75,6 +106,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps an on-screen guide in front of the user.
 
 ### Removed
+- About 360 lines of dead surface, cleared by the deletion test: `OverlayLogger`
+  (one real caller, inlined as plain `Log` calls), `CallManager`'s uncalled
+  dial-string and overlay pass-throughs plus its Compose snapshot state, the
+  repository → viewmodel → DAO read chain no screen ever called,
+  `SettingsRepository`'s unconsumed mirror flags, and `PaymentState`'s two
+  zero-caller presentation extensions. The tested `PaymentTransactionStore`
+  half of the repository is untouched.
 - `release.yml`, the CI workflow that attached an unsigned APK to a draft
   GitHub Release, is deleted — the repository has no tags and never has,
   so it had not executed once. The repository ships source; building a

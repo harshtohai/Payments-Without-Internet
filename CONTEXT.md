@@ -16,6 +16,13 @@ payment outcome. The session machine's ephemeral states (`Initiating`,
 `InProgress`, `WaitingForVerification`) are not status words; they are
 session state.
 
+## Session data
+
+The facts every non-idle payment carries, on every `PaymentState`:
+which payment (`transactionId`), to whom (`phoneNumber`), for how much
+(`amount`). One home — the `PaymentState.SessionData` interface — instead of
+per-state accessor tables.
+
 ## Claim
 
 The single, atomic act by which an incoming SMS wins the right to be
